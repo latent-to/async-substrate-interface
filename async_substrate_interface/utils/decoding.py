@@ -118,11 +118,19 @@ def _decode_query_map_pre(
     hex_to_bytes_ = hex_to_bytes
 
     # Determine type string
-    key_type_string_ = []
-    for n in range(len(params), len(param_types)):
-        key_type_string_.append(f"[u8; {concat_hash_len(key_hashers[n])}]")
-        key_type_string_.append(param_types[n])
-    key_type_string = f"({', '.join(key_type_string_)})"
+    n_free_keys = len(param_types) - len(params)
+    if n_free_keys == 1:
+        # Single-key map: skip the hash prefix bytes entirely — no need to decode them
+        n = len(params)
+        hash_len = concat_hash_len(key_hashers[n])
+        key_type_string = param_types[n]
+    else:
+        key_type_string_ = []
+        for n in range(len(params), len(param_types)):
+            key_type_string_.append(f"[u8; {concat_hash_len(key_hashers[n])}]")
+            key_type_string_.append(param_types[n])
+        key_type_string = f"({', '.join(key_type_string_)})"
+        hash_len = None
 
     pre_decoded_keys = []
     pre_decoded_key_types = [key_type_string] * len(result_group_changes)
@@ -130,7 +138,8 @@ def _decode_query_map_pre(
     pre_decoded_value_types = [value_type] * len(result_group_changes)
 
     for item in result_group_changes:
-        pre_decoded_keys.append(bytes.fromhex(item[0][len(prefix) :]))
+        raw_key = bytes.fromhex(item[0][len(prefix) :])
+        pre_decoded_keys.append(raw_key[hash_len:] if hash_len else raw_key)
         pre_decoded_values.append(
             hex_to_bytes_(item[1]) if item[1] is not None else b""
         )
@@ -165,11 +174,11 @@ def _decode_query_map_post(
         try:
             # strip key_hashers to use as item key
             if len(param_types) - len(params) == 1:
-                item_key = dk[1]
+                item_key = dk
                 if decode_ss58:
                     if (
                         isinstance(item_key[0], (tuple, list))
-                        and kts[kts.index(", ") + 2 : kts.index(")")] == "scale_info::0"
+                        and kts == "scale_info::0"
                     ):
                         item_key = ss58_encode(bytes(item_key[0]), runtime.ss58_format)
             else:
