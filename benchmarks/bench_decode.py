@@ -37,6 +37,7 @@ from bt_decode import decode as bt_decode_one
 from bt_decode import decode_list as bt_decode_many
 
 import scalecodec
+
 print(f"scalecodec: {scalecodec.__file__}", flush=True)
 
 from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
@@ -45,6 +46,7 @@ from scalecodec.type_registry import load_type_registry_preset
 # ---------------------------------------------------------------------------
 # cyscale helpers
 # ---------------------------------------------------------------------------
+
 
 def _init_cyscale(metadata_hex: str):
     """Initialize RuntimeConfigurationObject with portable registry."""
@@ -80,6 +82,7 @@ def cyscale_batch_decode(
 # Record mode
 # ---------------------------------------------------------------------------
 
+
 async def _record(output_path: str):
     """Connect to a live Bittensor node, capture real decode inputs, save fixtures."""
     import bt_decode as _bt_module
@@ -90,10 +93,10 @@ async def _record(output_path: str):
 
     # Scenarios to capture: (module, storage_fn, params, page_size, label)
     _QUERIES = [
-        ("SubtensorModule", "Uids",             [],     100, "Uids (u16, N=100)"),
-        ("SubtensorModule", "Stake",            [],     100, "Stake (u64, N=100)"),
-        ("SubtensorModule", "TotalHotkeyAlpha", [],     100, "TotalHotkeyAlpha (N=100)"),
-        ("SubtensorModule", "Neurons",          [1],    20,  "Neurons netuid=1 (struct, N=20)"),
+        ("SubtensorModule", "Uids", [], 100, "Uids (u16, N=100)"),
+        ("SubtensorModule", "Stake", [], 100, "Stake (u64, N=100)"),
+        ("SubtensorModule", "TotalHotkeyAlpha", [], 100, "TotalHotkeyAlpha (N=100)"),
+        ("SubtensorModule", "Neurons", [1], 20, "Neurons netuid=1 (struct, N=20)"),
     ]
 
     captured: dict[str, dict] = {}
@@ -136,13 +139,16 @@ async def _record(output_path: str):
                                 ],
                             }
                         return _orig_decode_list(type_strings, registry, bytes_list)
+
                     return _p
 
                 import async_substrate_interface.utils.decoding as _decoding_mod
+
                 _decoding_mod.decode_list = _make_capture(label, _scenario_capture)
 
                 qm = await substrate.query_map(
-                    module, storage_fn,
+                    module,
+                    storage_fn,
                     params=params,
                     block_hash=block_hash,
                     page_size=page_size,
@@ -164,6 +170,7 @@ async def _record(output_path: str):
             except Exception as e:
                 print(f"  SKIP '{label}': {e}", flush=True)
                 import async_substrate_interface.utils.decoding as _decoding_mod
+
                 _decoding_mod.decode_list = _orig_decode_list
 
     fixture = {
@@ -181,19 +188,32 @@ async def _record(output_path: str):
 # Benchmark mode
 # ---------------------------------------------------------------------------
 
-def _header(title: str, extra_col: str = ""):
-    print(f"\n{'─' * 84}")
+_W = 70
+
+
+def _header(title: str):
+    print(f"\n{'─' * _W}")
     print(f"  {title}")
-    print(f"{'─' * 84}")
-    print(f"  {'Scenario':<38}  {'bt_decode':>10}  {'cy_loop':>10}  {'cy_batch':>10}  {'speedup':>8}")
-    print(f"  {'─'*38}  {'─'*10}  {'─'*10}  {'─'*10}  {'─'*8}")
+    print(f"{'─' * _W}")
+    print(f"  {'Scenario':<38}  {'bt_decode':>10}  {'cy_batch':>10}  {'speedup':>7}")
+    print(f"  {'─' * 38}  {'─' * 10}  {'─' * 10}  {'─' * 7}")
 
 
-def _row(label: str, bt_us: float, cy_loop_us: float, cy_batch_us: float):
-    best_cy = min(cy_loop_us, cy_batch_us)
-    speedup = bt_us / best_cy if best_cy > 0 else float("inf")
-    marker = " ◀ cy faster" if speedup > 1.05 else (" ◀ bt faster" if speedup < 0.95 else "")
-    print(f"  {label:<38}  {bt_us:>10.1f}  {cy_loop_us:>10.1f}  {cy_batch_us:>10.1f}  {speedup:>7.2f}×{marker}")
+def _header_wide(title: str):
+    W2 = 90
+    print(f"\n{'─' * W2}")
+    print(f"  {title}")
+    print(f"{'─' * W2}")
+    print(
+        f"  {'Scenario':<36}  {'bt old':>10}  {'bt new':>10}  {'cy old':>10}  {'cy new':>10}  {'cy gain':>8}"
+    )
+    print(f"  {'─' * 36}  {'─' * 10}  {'─' * 10}  {'─' * 10}  {'─' * 10}  {'─' * 8}")
+
+
+def _row(label: str, bt_us: float, cy_us: float):
+    speedup = bt_us / cy_us if cy_us > 0 else float("inf")
+    tag = "cy" if speedup > 1.05 else ("bt" if speedup < 0.95 else "  ")
+    print(f"  {label:<38}  {bt_us:>10.1f}  {cy_us:>10.1f}  {speedup:>6.1f}× {tag}")
 
 
 def run(fn, iters: int) -> float:
@@ -218,34 +238,34 @@ def bench(fixture_path: str, iters: int):
     # -----------------------------------------------------------------------
     # Batch decode (query_map path)
     # -----------------------------------------------------------------------
-    _header("Batch decode  —  µs per full page")
+    _header("Batch decode  (µs per page)")
 
     for label, data in scenarios.items():
         type_strings = data["type_strings"]
         bytes_list = [bytes.fromhex(h) for h in data["bytes_list"]]
-        n = len(type_strings)
+        n = len(type_strings) // 2  # keys + values; show N items
 
         if n == 0:
             continue
 
         bt_us = run(
-            lambda ts=type_strings, r=registry, bl=bytes_list: bt_decode_many(ts, r, bl),
+            lambda ts=type_strings, r=registry, bl=bytes_list: bt_decode_many(
+                ts, r, bl
+            ),
             iters,
         )
-        cy_loop_us = run(
-            lambda ts=type_strings, r=rc, bl=bytes_list: cyscale_decode_many(ts, r, bl),
+        cy_us = run(
+            lambda ts=type_strings, r=rc, bl=bytes_list: cyscale_batch_decode(
+                ts, r, bl
+            ),
             iters,
         )
-        cy_batch_us = run(
-            lambda ts=type_strings, r=rc, bl=bytes_list: cyscale_batch_decode(ts, r, bl),
-            iters,
-        )
-        _row(f"{label}", bt_us, cy_loop_us, cy_batch_us)
+        _row(f"{label}", bt_us, cy_us)
 
     # -----------------------------------------------------------------------
     # Single-item decode (query / runtime_call path)
     # -----------------------------------------------------------------------
-    _header("Single-item decode  —  µs/call  (one item from each scenario)")
+    _header("Single decode  (µs/call)")
 
     for label, data in scenarios.items():
         if not data["type_strings"]:
@@ -257,57 +277,11 @@ def bench(fixture_path: str, iters: int):
             lambda t=ts, r=registry, b=raw: bt_decode_one(t, r, b),
             iters,
         )
-        cy_loop_us = run(
-            lambda t=ts, r=rc, b=raw: cyscale_decode_one(t, r, b),
-            iters,
-        )
-        cy_batch_us = run(
+        cy_us = run(
             lambda t=ts, r=rc, b=raw: rc.batch_decode([t], [b])[0],
             iters,
         )
-        _row(f"{label[:38]}", bt_us, cy_loop_us, cy_batch_us)
-
-    # -----------------------------------------------------------------------
-    # Per-item cost breakdown
-    # -----------------------------------------------------------------------
-    _header("Batch efficiency  —  µs/item  (batch ÷ N vs single)")
-
-    for label, data in scenarios.items():
-        type_strings = data["type_strings"]
-        bytes_list = [bytes.fromhex(h) for h in data["bytes_list"]]
-        n = len(type_strings)
-        if n < 2:
-            continue
-
-        bt_batch_us = run(
-            lambda ts=type_strings, r=registry, bl=bytes_list: bt_decode_many(ts, r, bl),
-            iters,
-        )
-        cy_batch_us = run(
-            lambda ts=type_strings, r=rc, bl=bytes_list: cyscale_batch_decode(ts, r, bl),
-            iters,
-        )
-
-        ts0 = type_strings[0]
-        raw0 = bytes_list[0]
-        bt_single_us = run(
-            lambda t=ts0, r=registry, b=raw0: bt_decode_one(t, r, b),
-            iters,
-        )
-        cy_single_us = run(
-            lambda t=ts0, r=rc, b=raw0: cyscale_decode_one(t, r, b),
-            iters,
-        )
-        cy_batch_single_us = run(
-            lambda t=ts0, r=rc, b=raw0: rc.batch_decode([t], [b])[0],
-            iters,
-        )
-
-        print(
-            f"  {label[:38]:<38}  N={n:>4}  "
-            f"bt {bt_batch_us/n:>7.2f} µs/item (single {bt_single_us:.2f})  "
-            f"cy_loop {cy_single_us:.2f}  cy_batch {cy_batch_us/n:.2f} µs/item (single {cy_batch_single_us:.2f})"
-        )
+        _row(f"{label[:38]}", bt_us, cy_us)
 
     # -----------------------------------------------------------------------
     # Synthetic: single-key optimization (hash prefix skip)
@@ -332,43 +306,65 @@ def bench(fixture_path: str, iters: int):
             _type_ids.setdefault(_lbl, _m.group(0))
 
     if len(_type_ids) >= 1:
-        _header("Single-key hash-prefix skip  —  OLD ([u8;16], T) vs NEW (T only)  —  µs/call, N=100")
+        _header_wide(
+            f"Single-key hash-prefix skip  (µs per {_synth_n}-item page, synthetic)"
+        )
 
         for _lbl, _ts_bare in _type_ids.items():
             _ts_wrapped = f"([u8; 16], {_ts_bare})"
 
             # Determine per-item byte size from the fixture value bytes
-            _raw_val_bytes = [bytes.fromhex(h) for h in scenarios[_lbl]["bytes_list"][len(scenarios[_lbl]["bytes_list"]) // 2:]]
+            _raw_val_bytes = [
+                bytes.fromhex(h)
+                for h in scenarios[_lbl]["bytes_list"][
+                    len(scenarios[_lbl]["bytes_list"]) // 2 :
+                ]
+            ]
             _item_size = len(_raw_val_bytes[0]) if _raw_val_bytes else 4
 
             # Generate synthetic random key payloads
             _rng = __import__("random")
             _rng.seed(42)
-            _bare_bytes  = [bytes(_rng.randrange(256) for _ in range(_item_size)) for _ in range(_synth_n)]
-            _wrapped_bytes = [bytes(_rng.randrange(256) for _ in range(16)) + b for b in _bare_bytes]
+            _bare_bytes = [
+                bytes(_rng.randrange(256) for _ in range(_item_size))
+                for _ in range(_synth_n)
+            ]
+            _wrapped_bytes = [
+                bytes(_rng.randrange(256) for _ in range(16)) + b for b in _bare_bytes
+            ]
             _ts_wrapped_list = [_ts_wrapped] * _synth_n
-            _ts_bare_list    = [_ts_bare]    * _synth_n
+            _ts_bare_list = [_ts_bare] * _synth_n
 
-            _bt_old_us = run(
-                lambda ts=_ts_wrapped_list, r=registry, bl=_wrapped_bytes: bt_decode_many(ts, r, bl),
+            _bt_old = run(
+                lambda ts=_ts_wrapped_list,
+                r=registry,
+                bl=_wrapped_bytes: bt_decode_many(ts, r, bl),
                 iters,
             )
-            _bt_new_us = run(
-                lambda ts=_ts_bare_list, r=registry, bl=_bare_bytes: bt_decode_many(ts, r, bl),
+            _bt_new = run(
+                lambda ts=_ts_bare_list, r=registry, bl=_bare_bytes: bt_decode_many(
+                    ts, r, bl
+                ),
                 iters,
             )
-            _cy_old_us = run(
-                lambda ts=_ts_wrapped_list, r=rc, bl=_wrapped_bytes: cyscale_batch_decode(ts, r, bl),
+            _cy_old = run(
+                lambda ts=_ts_wrapped_list,
+                r=rc,
+                bl=_wrapped_bytes: cyscale_batch_decode(ts, r, bl),
                 iters,
             )
-            _cy_new_us = run(
-                lambda ts=_ts_bare_list, r=rc, bl=_bare_bytes: cyscale_batch_decode(ts, r, bl),
+            _cy_new = run(
+                lambda ts=_ts_bare_list, r=rc, bl=_bare_bytes: cyscale_batch_decode(
+                    ts, r, bl
+                ),
                 iters,
             )
+            _cy_gain = _cy_old / _cy_new if _cy_new > 0 else float("inf")
             print(
-                f"  {_lbl[:32]:<32}  item_sz={_item_size:>2}B  "
-                f"bt  OLD {_bt_old_us:>8.1f} → NEW {_bt_new_us:>8.1f} µs  ({_bt_old_us/_bt_new_us:.2f}×)  "
-                f"cy  OLD {_cy_old_us:>8.1f} → NEW {_cy_new_us:>8.1f} µs  ({_cy_old_us/_cy_new_us:.2f}×)"
+                f"  {(_lbl[:32] + f' ({_item_size}B key)'):<36}  "
+                f"{_bt_old:>10.1f}  {_bt_new:>10.1f}  "
+                f"{_cy_old:>10.1f}  {_cy_new:>10.1f}  "
+                f"{_cy_gain:>7.0f}×"
             )
 
 
@@ -376,11 +372,16 @@ def bench(fixture_path: str, iters: int):
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("fixture", nargs="?", help="Fixture JSON file for benchmarking")
-    parser.add_argument("--record", metavar="FILE", help="Record fixtures from live node")
-    parser.add_argument("--iters", type=int, default=200, help="Iterations per benchmark (default: 200)")
+    parser.add_argument(
+        "--record", metavar="FILE", help="Record fixtures from live node"
+    )
+    parser.add_argument(
+        "--iters", type=int, default=200, help="Iterations per benchmark (default: 200)"
+    )
     args = parser.parse_args()
 
     if args.record:

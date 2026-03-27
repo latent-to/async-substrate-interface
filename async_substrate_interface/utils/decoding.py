@@ -175,11 +175,14 @@ def _decode_query_map_post(
             # strip key_hashers to use as item key
             if len(param_types) - len(params) == 1:
                 item_key = dk
-                if decode_ss58:
-                    if (
-                        isinstance(item_key[0], (tuple, list))
-                        and kts == "scale_info::0"
-                    ):
+                if decode_ss58 and kts == "scale_info::0":
+                    if isinstance(item_key, str) and item_key.startswith("0x"):
+                        # cyscale fast path returns hex string
+                        item_key = ss58_encode(
+                            bytes.fromhex(item_key[2:]), runtime.ss58_format
+                        )
+                    elif isinstance(item_key[0], (tuple, list)):
+                        # bt_decode returns a tuple-wrapped byte array
                         item_key = ss58_encode(bytes(item_key[0]), runtime.ss58_format)
             else:
                 try:
