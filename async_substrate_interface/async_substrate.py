@@ -26,7 +26,7 @@ from typing import (
 
 import scalecodec
 import websockets.exceptions
-from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
+from bt_decode import MetadataV15, PortableRegistry
 from scalecodec import GenericVariant
 from scalecodec.base import ScaleBytes, ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
@@ -75,7 +75,6 @@ from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
     _bt_decode_to_dict_or_list,
     legacy_scale_decode,
-    convert_account_ids,
     decode_query_map_async,
 )
 from async_substrate_interface.utils.storage import StorageKey
@@ -1263,7 +1262,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         _mock: bool = False,
         _log_raw_websockets: bool = False,
         ws_shutdown_timer: Optional[float] = 5.0,
-        decode_ss58: bool = False,
         _ssl_context: Optional[_SessionResumingSSLContext] = None,
         dns_ttl: int = 300,
     ):
@@ -1285,7 +1283,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
             _mock: whether to use mock version of the subtensor interface
             _log_raw_websockets: whether to log raw websocket requests during RPC requests
             ws_shutdown_timer: how long after the last connection your websocket should close
-            decode_ss58: Whether to decode AccountIds to SS58 or leave them in raw bytes tuples.
             _ssl_context: optional session-resuming SSL context; used internally by
                 DiskCachedAsyncSubstrateInterface to enable TLS session reuse.
             dns_ttl: seconds to cache DNS results for the websocket URL (default 300). Set to 0
@@ -1297,7 +1294,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
             type_registry_preset,
             use_remote_preset,
             ss58_format,
-            decode_ss58,
         )
         self.max_retries = max_retries
         self.retry_timeout = retry_timeout
@@ -1552,17 +1548,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 runtime = await self.init_runtime(block_hash=block_hash)
             if runtime.metadata_v15 is not None and force_legacy is False:
                 obj = await asyncio.to_thread(
-                    decode_by_type_string, type_string, runtime.registry, scale_bytes
+                    runtime.runtime_config.batch_decode, [type_string], [scale_bytes]
                 )
-                if self.decode_ss58:
-                    try:
-                        type_str_int = int(type_string.split("::")[1])
-                        decoded_type_str = runtime.type_id_to_name[type_str_int]
-                        obj = convert_account_ids(
-                            obj, decoded_type_str, runtime.ss58_format
-                        )
-                    except (ValueError, KeyError):
-                        pass
+                obj = obj[0]
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, runtime)
         if return_scale_obj:
@@ -4050,7 +4038,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     value_type,
                     key_hashers,
                     ignore_decoding_errors,
-                    self.decode_ss58,
                 )
             else:
                 # storage item and value scale type are not included here because this is batch-decoded in rust
@@ -4097,7 +4084,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     value_type,
                     key_hashers,
                     ignore_decoding_errors,
-                    self.decode_ss58,
                 )
         return AsyncQueryMapResult(
             records=result,

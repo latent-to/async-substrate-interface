@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Union, Any, Sequence, Generic, TypeVar
 
 import scalecodec.types
-from bt_decode import PortableRegistry, encode as encode_by_type_string
+from bt_decode import PortableRegistry
 from bt_decode.bt_decode import MetadataV15
 from scalecodec import ss58_encode, ss58_decode, is_valid_ss58_address
 from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
@@ -286,7 +286,8 @@ class Runtime:
         # Update type registry
         self.reload_type_registry(use_remote_preset=False, auto_discover=True)
 
-        self.runtime_config.set_active_spec_version_id(self.runtime_version)
+        if self.runtime_version is not None:
+            self.runtime_config.set_active_spec_version_id(self.runtime_version)
         if self.implements_scaleinfo:
             logger.debug("Adding PortableRegistry from metadata to type registry")
             self.runtime_config.add_portable_registry(self.metadata)
@@ -743,10 +744,8 @@ class SubstrateMixin(ABC):
         type_registry_preset: Optional[str] = None,
         use_remote_preset: bool = False,
         ss58_format: Optional[int] = None,
-        decode_ss58: bool = False,
     ):
         # We load a very basic RuntimeConfigurationObject that is only used for the initial metadata decoding
-        self.decode_ss58 = decode_ss58
         self.runtime_config = RuntimeConfigurationObject(ss58_format=ss58_format)
         self.ss58_format = ss58_format
         self.runtime_config.update_type_registry(load_type_registry_preset(name="core"))
@@ -1124,7 +1123,11 @@ class SubstrateMixin(ABC):
                 else:
                     value = value.value  # Unwrap the value of the type
 
-            result = bytes(encode_by_type_string(type_string, runtime.registry, value))
+            result = bytes(
+                runtime.runtime_config.create_scale_object(type_string)
+                .encode(value)
+                .data
+            )
         return result
 
     @staticmethod

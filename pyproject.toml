@@ -10,10 +10,10 @@ dependencies = [
   "wheel",
   "aiosqlite>=0.21.0,<1.0.0",
   "bt-decode==v0.8.0",
-    #"cyscale",  # does not exist yet on pypi
-  "scalecodec~=1.2.11",
+  "cyscale",
   "websockets>=14.1",
   "xxhash",
+  "ruff==0.11.5",
 ]
 
 requires-python = ">=3.10,<3.15"
@@ -64,3 +64,6 @@ dev = [
     "bittensor-wallet>=4.0.0",
     "pytest-forked"
 ]
+
+[tool.uv.sources]
+cyscale = { path = "../cy-scale-codec", editable = true }

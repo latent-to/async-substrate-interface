@@ -7,7 +7,7 @@ from typing import Optional, Union, Callable, Any
 from unittest.mock import MagicMock
 
 import scalecodec
-from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
+from bt_decode import MetadataV15, PortableRegistry
 from scalecodec import (
     GenericCall,
     GenericExtrinsic,
@@ -48,7 +48,6 @@ from async_substrate_interface.utils.decoding import (
     _bt_decode_to_dict_or_list,
     decode_query_map,
     legacy_scale_decode,
-    convert_account_ids,
 )
 from async_substrate_interface.utils.storage import StorageKey
 from async_substrate_interface.type_registry import _TYPE_REGISTRY
@@ -546,7 +545,6 @@ class SubstrateInterface(SubstrateMixin):
         retry_timeout: float = 60.0,
         _mock: bool = False,
         _log_raw_websockets: bool = False,
-        decode_ss58: bool = False,
     ):
         """
         The sync compatible version of the subtensor interface commands we use in bittensor. Use this instance only
@@ -564,7 +562,6 @@ class SubstrateInterface(SubstrateMixin):
             retry_timeout: how to long wait since the last ping to retry the RPC request
             _mock: whether to use mock version of the subtensor interface
             _log_raw_websockets: whether to log raw websocket requests during RPC requests
-            decode_ss58: Whether to decode AccountIds to SS58 or leave them in raw bytes tuples.
 
         """
         super().__init__(
@@ -572,7 +569,6 @@ class SubstrateInterface(SubstrateMixin):
             type_registry_preset,
             use_remote_preset,
             ss58_format,
-            decode_ss58,
         )
         self.max_retries = max_retries
         self.retry_timeout = retry_timeout
@@ -765,20 +761,11 @@ class SubstrateInterface(SubstrateMixin):
         else:
             if self.runtime.metadata_v15 is not None and force_legacy is False:
                 try:
-                    obj = decode_by_type_string(
-                        type_string, self.runtime.registry, scale_bytes
-                    )
-                except ValueError:
+                    obj = self.runtime.runtime_config.batch_decode(
+                        [type_string], [scale_bytes]
+                    )[0]
+                except (ValueError, Exception):
                     obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
-                if self.decode_ss58:
-                    try:
-                        type_str_int = int(type_string.split("::")[1])
-                        decoded_type_str = self.runtime.type_id_to_name[type_str_int]
-                        obj = convert_account_ids(
-                            obj, decoded_type_str, self.ss58_format
-                        )
-                    except (ValueError, KeyError):
-                        pass
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
         if return_scale_obj:
@@ -3075,7 +3062,6 @@ class SubstrateInterface(SubstrateMixin):
                     value_type,
                     key_hashers,
                     ignore_decoding_errors,
-                    self.decode_ss58,
                 )
         return QueryMapResult(
             records=result,
