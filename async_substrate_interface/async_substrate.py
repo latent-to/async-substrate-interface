@@ -26,7 +26,7 @@ from typing import (
 
 import scalecodec
 import websockets.exceptions
-from bt_decode import MetadataV15, PortableRegistry
+from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
 from scalecodec import GenericVariant
 from scalecodec.base import ScaleBytes, ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
@@ -1547,10 +1547,23 @@ class AsyncSubstrateInterface(SubstrateMixin):
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
             if runtime.metadata_v15 is not None and force_legacy is False:
-                obj = await asyncio.to_thread(
-                    runtime.runtime_config.batch_decode, [type_string], [scale_bytes]
-                )
-                obj = obj[0]
+                try:
+                    obj = await asyncio.to_thread(
+                        runtime.runtime_config.batch_decode,
+                        [type_string],
+                        [scale_bytes],
+                    )
+                    obj = obj[0]
+                except NotImplementedError:
+                    try:
+                        obj = await asyncio.to_thread(
+                            decode_by_type_string,
+                            type_string,
+                            runtime.registry,
+                            scale_bytes,
+                        )
+                    except ValueError:
+                        obj = legacy_scale_decode(type_string, scale_bytes, runtime)
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, runtime)
         if return_scale_obj:
@@ -3485,7 +3498,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         # Get correct type
-        result_decoded = runtime_call_def["decoder"](bytes(result_bytes))
+        if isinstance(result_bytes, str):
+            raw_bytes = hex_to_bytes(result_bytes)
+        else:
+            raw_bytes = bytes(result_bytes)
+        result_decoded = runtime_call_def["decoder"](raw_bytes)
         as_dict = _bt_decode_to_dict_or_list(result_decoded)
         logger.debug("Decoded old runtime call result: ", as_dict)
         result_obj = ScaleObj(as_dict)

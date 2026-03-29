@@ -7,7 +7,7 @@ from typing import Optional, Union, Callable, Any
 from unittest.mock import MagicMock
 
 import scalecodec
-from bt_decode import MetadataV15, PortableRegistry
+from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
 from scalecodec import (
     GenericCall,
     GenericExtrinsic,
@@ -764,8 +764,15 @@ class SubstrateInterface(SubstrateMixin):
                     obj = self.runtime.runtime_config.batch_decode(
                         [type_string], [scale_bytes]
                     )[0]
-                except (ValueError, Exception):
-                    obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
+                except NotImplementedError:
+                    try:
+                        obj = decode_by_type_string(
+                            type_string, self.runtime.registry, scale_bytes
+                        )
+                    except ValueError:
+                        obj = legacy_scale_decode(
+                            type_string, scale_bytes, self.runtime
+                        )
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
         if return_scale_obj:
@@ -2570,7 +2577,11 @@ class SubstrateInterface(SubstrateMixin):
 
         # Decode result
         # Get correct type
-        result_decoded = runtime_call_def["decoder"](bytes(result_bytes))
+        if isinstance(result_bytes, str):
+            raw_bytes = hex_to_bytes(result_bytes)
+        else:
+            raw_bytes = bytes(result_bytes)
+        result_decoded = runtime_call_def["decoder"](raw_bytes)
         as_dict = _bt_decode_to_dict_or_list(result_decoded)
         logger.debug("Decoded old runtime call result: ", as_dict)
         result_obj = ScaleObj(as_dict)
