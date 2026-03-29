@@ -42,13 +42,14 @@ print(f"scalecodec: {scalecodec.__file__}", flush=True)
 
 from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
 from scalecodec.type_registry import load_type_registry_preset
+from scalecodec import ss58_encode as _ss58_encode
 
 # ---------------------------------------------------------------------------
 # cyscale helpers
 # ---------------------------------------------------------------------------
 
 
-def _init_cyscale(metadata_hex: str):
+def _init_cyscale(metadata_hex: str, ss58_format: int = 42):
     """Initialize RuntimeConfigurationObject with portable registry."""
     rc = RuntimeConfigurationObject()
     rc.update_type_registry(load_type_registry_preset("core"))
@@ -56,26 +57,56 @@ def _init_cyscale(metadata_hex: str):
     meta = rc.create_scale_object("MetadataVersioned", ScaleBytes(metadata_hex))
     meta.decode()
     rc.add_portable_registry(meta)
+    rc.ss58_format = ss58_format
     return rc
-
-
-def cyscale_decode_one(type_string: str, rc: RuntimeConfigurationObject, data: bytes):
-    return rc.create_scale_object(type_string, ScaleBytes(data)).decode()
-
-
-def cyscale_decode_many(
-    type_strings: list, rc: RuntimeConfigurationObject, data_list: list
-):
-    results = []
-    for ts, data in zip(type_strings, data_list):
-        results.append(rc.create_scale_object(ts, ScaleBytes(data)).decode())
-    return results
 
 
 def cyscale_batch_decode(
     type_strings: list, rc: RuntimeConfigurationObject, data_list: list
 ):
     return rc.batch_decode(type_strings, data_list)
+
+
+# ---------------------------------------------------------------------------
+# bt_decode + SS58 post-processing
+#
+# bt_decode does not perform SS58 encoding. To make the comparison fair we
+# apply ss58_encode to any result where the type string is "scale_info::0"
+# (AccountId32) and the returned value has the shape bt_decode uses for it:
+# a single-element tuple wrapping a 32-element int sequence.
+# ---------------------------------------------------------------------------
+
+_SS58_FORMAT = 42
+
+
+def _apply_ss58_recursive(val):
+    """
+    Recursively walk a bt_decode result and SS58-encode any raw AccountId32
+    values. bt_decode represents AccountId32 as a 1-element tuple wrapping a
+    32-element int tuple: ((b0, b1, ..., b31),). This shape is structurally
+    unambiguous for Substrate types.
+    """
+    if (
+        isinstance(val, (tuple, list))
+        and len(val) == 1
+        and isinstance(val[0], (tuple, list))
+        and len(val[0]) == 32
+        and all(isinstance(b, int) for b in val[0])
+    ):
+        return _ss58_encode(bytes(val[0]), _SS58_FORMAT)
+    if isinstance(val, (tuple, list)):
+        return type(val)(_apply_ss58_recursive(v) for v in val)
+    return val
+
+
+def bt_decode_many_with_ss58(type_strings, registry, bytes_list):
+    """bt_decode_many + SS58 post-processing to match cyscale output."""
+    return [_apply_ss58_recursive(v) for v in bt_decode_many(type_strings, registry, bytes_list)]
+
+
+def bt_decode_one_with_ss58(type_string, registry, data):
+    """bt_decode_one + SS58 post-processing to match cyscale output."""
+    return _apply_ss58_recursive(bt_decode_one(type_string, registry, data))
 
 
 # ---------------------------------------------------------------------------
@@ -100,10 +131,8 @@ async def _record(output_path: str):
     ]
 
     captured: dict[str, dict] = {}
-    _orig_decode_list = _bt_module.decode_list
 
-    def _patched_decode_list(type_strings, registry, bytes_list):
-        return _orig_decode_list(type_strings, registry, bytes_list)
+    import async_substrate_interface.utils.decoding as _decoding_mod
 
     print("Connecting to node…", flush=True)
     async with AsyncSubstrateInterface(
@@ -125,11 +154,12 @@ async def _record(output_path: str):
         print("Fetching query_map scenarios…", flush=True)
         for module, storage_fn, params, page_size, label in _QUERIES:
             try:
-                # Monkey-patch to capture this scenario's inputs
+                # Monkey-patch _async_decode_scale_list_with_runtime to capture inputs
                 _scenario_capture = {}
+                _orig_fn = _decoding_mod._async_decode_scale_list_with_runtime
 
-                def _make_capture(lbl, store):
-                    def _p(type_strings, registry, bytes_list):
+                def _make_capture(lbl, store, orig):
+                    async def _p(type_strings, bytes_list, rt, return_scale_obj=False):
                         if lbl not in store:
                             store[lbl] = {
                                 "type_strings": list(type_strings),
@@ -138,13 +168,15 @@ async def _record(output_path: str):
                                     for b in bytes_list
                                 ],
                             }
-                        return _orig_decode_list(type_strings, registry, bytes_list)
+                        return await orig(
+                            type_strings, bytes_list, rt, return_scale_obj
+                        )
 
                     return _p
 
-                import async_substrate_interface.utils.decoding as _decoding_mod
-
-                _decoding_mod.decode_list = _make_capture(label, _scenario_capture)
+                _decoding_mod._async_decode_scale_list_with_runtime = _make_capture(
+                    label, _scenario_capture, _orig_fn
+                )
 
                 qm = await substrate.query_map(
                     module,
@@ -158,7 +190,7 @@ async def _record(output_path: str):
                     if label in _scenario_capture:
                         break  # one page is enough
 
-                _decoding_mod.decode_list = _orig_decode_list
+                _decoding_mod._async_decode_scale_list_with_runtime = _orig_fn
 
                 if label in _scenario_capture:
                     captured[label] = _scenario_capture[label]
@@ -169,9 +201,7 @@ async def _record(output_path: str):
 
             except Exception as e:
                 print(f"  SKIP '{label}': {e}", flush=True)
-                import async_substrate_interface.utils.decoding as _decoding_mod
-
-                _decoding_mod.decode_list = _orig_decode_list
+                _decoding_mod._async_decode_scale_list_with_runtime = _orig_fn
 
     fixture = {
         "block_hash": block_hash,
@@ -195,7 +225,7 @@ def _header(title: str):
     print(f"\n{'─' * _W}")
     print(f"  {title}")
     print(f"{'─' * _W}")
-    print(f"  {'Scenario':<38}  {'bt_decode':>10}  {'cy_batch':>10}  {'speedup':>7}")
+    print(f"  {'Scenario':<38}  {'bt+ss58':>10}  {'cy_batch':>10}  {'speedup':>7}")
     print(f"  {'─' * 38}  {'─' * 10}  {'─' * 10}  {'─' * 7}")
 
 
@@ -205,7 +235,7 @@ def _header_wide(title: str):
     print(f"  {title}")
     print(f"{'─' * W2}")
     print(
-        f"  {'Scenario':<36}  {'bt old':>10}  {'bt new':>10}  {'cy old':>10}  {'cy new':>10}  {'cy gain':>8}"
+        f"  {'Scenario':<36}  {'bt+ss58 old':>11}  {'bt+ss58 new':>11}  {'cy old':>10}  {'cy new':>10}  {'cy gain':>8}"
     )
     print(f"  {'─' * 36}  {'─' * 10}  {'─' * 10}  {'─' * 10}  {'─' * 10}  {'─' * 8}")
 
@@ -231,7 +261,7 @@ def bench(fixture_path: str, iters: int):
     registry = PortableRegistry.from_json(fixture["registry_json"])
 
     # --- Initialize cyscale ---
-    rc = _init_cyscale(fixture["metadata_hex"])
+    rc = _init_cyscale(fixture["metadata_hex"], ss58_format=42)
 
     scenarios = fixture["scenarios"]
 
@@ -249,7 +279,7 @@ def bench(fixture_path: str, iters: int):
             continue
 
         bt_us = run(
-            lambda ts=type_strings, r=registry, bl=bytes_list: bt_decode_many(
+            lambda ts=type_strings, r=registry, bl=bytes_list: bt_decode_many_with_ss58(
                 ts, r, bl
             ),
             iters,
@@ -274,7 +304,7 @@ def bench(fixture_path: str, iters: int):
         raw = bytes.fromhex(data["bytes_list"][0])
 
         bt_us = run(
-            lambda t=ts, r=registry, b=raw: bt_decode_one(t, r, b),
+            lambda t=ts, r=registry, b=raw: bt_decode_one_with_ss58(t, r, b),
             iters,
         )
         cy_us = run(
@@ -338,13 +368,13 @@ def bench(fixture_path: str, iters: int):
             _bt_old = run(
                 lambda ts=_ts_wrapped_list,
                 r=registry,
-                bl=_wrapped_bytes: bt_decode_many(ts, r, bl),
+                bl=_wrapped_bytes: bt_decode_many_with_ss58(ts, r, bl),
                 iters,
             )
             _bt_new = run(
-                lambda ts=_ts_bare_list, r=registry, bl=_bare_bytes: bt_decode_many(
-                    ts, r, bl
-                ),
+                lambda ts=_ts_bare_list,
+                r=registry,
+                bl=_bare_bytes: bt_decode_many_with_ss58(ts, r, bl),
                 iters,
             )
             _cy_old = run(
