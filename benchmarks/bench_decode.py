@@ -101,7 +101,10 @@ def _apply_ss58_recursive(val):
 
 def bt_decode_many_with_ss58(type_strings, registry, bytes_list):
     """bt_decode_many + SS58 post-processing to match cyscale output."""
-    return [_apply_ss58_recursive(v) for v in bt_decode_many(type_strings, registry, bytes_list)]
+    return [
+        _apply_ss58_recursive(v)
+        for v in bt_decode_many(type_strings, registry, bytes_list)
+    ]
 
 
 def bt_decode_one_with_ss58(type_string, registry, data):
