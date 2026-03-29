@@ -1,7 +1,6 @@
 import asyncio
 from typing import Union, TYPE_CHECKING
 
-from bt_decode import AxonInfo, PrometheusInfo
 from scalecodec import ScaleBytes
 
 from async_substrate_interface.utils import hex_to_bytes
@@ -39,28 +38,13 @@ def _determine_if_old_runtime_call(runtime_call_def, metadata_v15_value) -> bool
     return False
 
 
-def _bt_decode_to_dict_or_list(obj) -> Union[dict, list[dict]]:
-    if isinstance(obj, list):
-        return [_bt_decode_to_dict_or_list(item) for item in obj]
-
-    as_dict = {}
-    for key in dir(obj):
-        if not key.startswith("_"):
-            val = getattr(obj, key)
-            if isinstance(val, (AxonInfo, PrometheusInfo)):
-                as_dict[key] = _bt_decode_to_dict_or_list(val)
-            else:
-                as_dict[key] = val
-    return as_dict
-
-
 def _decode_scale_list_with_runtime(
     type_strings: list[str],
     scale_bytes_list: list[bytes],
     runtime: "Runtime",
     return_scale_obj: bool = False,
 ):
-    if runtime.metadata_v15 is not None:
+    if runtime.implements_scaleinfo:
         obj = runtime.runtime_config.batch_decode(type_strings, scale_bytes_list)
     else:
         obj = [
@@ -79,7 +63,7 @@ async def _async_decode_scale_list_with_runtime(
     runtime: "Runtime",
     return_scale_obj: bool = False,
 ):
-    if runtime.metadata_v15 is not None:
+    if runtime.implements_scaleinfo:
         obj = await asyncio.to_thread(
             runtime.runtime_config.batch_decode, type_strings, scale_bytes_list
         )

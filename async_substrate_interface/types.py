@@ -10,8 +10,6 @@ from datetime import datetime
 from typing import Optional, Union, Any, Sequence, Generic, TypeVar
 
 import scalecodec.types
-from bt_decode import PortableRegistry
-from bt_decode.bt_decode import MetadataV15
 from scalecodec import ss58_encode, ss58_decode, is_valid_ss58_address
 from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
 from scalecodec.type_registry import load_type_registry_preset
@@ -192,6 +190,40 @@ class RuntimeCache:
         )
 
 
+def _decode_option_opaque_metadata(data: bytes) -> Optional[bytes]:
+    """Strip SCALE Option<OpaqueMetadata> prefix and return raw metadata bytes."""
+    if not data or data[0] == 0:
+        return None
+    data = data[1:]  # strip Option::Some byte
+    # Decode compact-encoded Vec<u8> length
+    mode = data[0] & 0x03
+    if mode == 0:
+        length = data[0] >> 2
+        offset = 1
+    elif mode == 1:
+        length = int.from_bytes(data[:2], "little") >> 2
+        offset = 2
+    elif mode == 2:
+        length = int.from_bytes(data[:4], "little") >> 2
+        offset = 4
+    else:
+        byte_count = (data[0] >> 2) + 4
+        length = int.from_bytes(data[1 : 1 + byte_count], "little")
+        offset = 1 + byte_count
+    return data[offset : offset + length]
+
+
+def _decode_v15_metadata(raw_metadata_bytes: bytes):
+    """Decode raw V15 metadata bytes (magic+version+body) using a fresh cyscale RuntimeConfigurationObject."""
+    rc = RuntimeConfigurationObject()
+    rc.update_type_registry(load_type_registry_preset(name="core"))
+    meta_obj = rc.create_scale_object(
+        "MetadataVersioned", data=ScaleBytes(raw_metadata_bytes)
+    )
+    meta_obj.decode()
+    return meta_obj
+
+
 class Runtime:
     """
     The Runtime object holds the necessary metadata and registry information required to do necessary scale encoding and
@@ -206,7 +238,6 @@ class Runtime:
     runtime_config: RuntimeConfigurationObject
     runtime_info = None
     type_registry_preset = None
-    registry: Optional[PortableRegistry] = None
     registry_type_map: dict[str, int]
     type_id_to_name: dict[int, str]
 
@@ -216,10 +247,10 @@ class Runtime:
         metadata: scalecodec.types.GenericMetadataVersioned,
         type_registry: dict,
         runtime_config: Optional[RuntimeConfigurationObject] = None,
-        metadata_v15: Optional[MetadataV15] = None,
+        metadata_v15: Optional[Any] = None,
         runtime_info: Optional[dict] = None,
-        registry: Optional[PortableRegistry] = None,
         ss58_format: int = SS58_FORMAT,
+        **kwargs,
     ):
         self.ss58_format = ss58_format
         self.config = {}
@@ -227,9 +258,7 @@ class Runtime:
         self.type_registry = type_registry
         self.metadata = metadata
         self.metadata_v15 = metadata_v15
-        self._v15_storage_type_map: Optional[dict[tuple[str, str], int]] = None
         self.runtime_info = runtime_info
-        self.registry = registry
         runtime_info = runtime_info or {}
         self.runtime_version = runtime_info.get("specVersion")
         self.transaction_version = runtime_info.get("transactionVersion")
@@ -237,26 +266,31 @@ class Runtime:
             implements_scale_info=self.implements_scaleinfo
         )
         self.load_runtime()
-        if registry is not None:
+        if self.implements_scaleinfo:
             self.load_registry_type_map()
 
     def serialize(self):
         metadata_value = self.metadata.data.data
+        # Serialize V15 metadata as raw bytes if available
+        metadata_v15_bytes = None
+        if self.metadata_v15 is not None:
+            metadata_v15_bytes = list(self.metadata_v15.data.data)
         return {
             "chain": self.chain,
             "type_registry": self.type_registry,
             "metadata_value": metadata_value,
-            "metadata_v15": self.metadata_v15.encode_to_metadata_option(),
+            "metadata_v15": metadata_v15_bytes,
             "runtime_info": {
                 "specVersion": self.runtime_version,
                 "transactionVersion": self.transaction_version,
             },
-            "registry": self.registry.registry if self.registry is not None else None,
             "ss58_format": self.ss58_format,
         }
 
     @classmethod
     def deserialize(cls, serialized: dict) -> "Runtime":
+        from scalecodec.type_registry import load_type_registry_preset
+
         ss58_format = serialized["ss58_format"]
         runtime_config = RuntimeConfigurationObject(ss58_format=ss58_format)
         runtime_config.clear_type_registry()
@@ -265,16 +299,15 @@ class Runtime:
             "MetadataVersioned", data=ScaleBytes(serialized["metadata_value"])
         )
         metadata.decode()
-        registry = PortableRegistry.from_json(serialized["registry"])
+        metadata_v15 = None
+        if serialized.get("metadata_v15"):
+            metadata_v15 = _decode_v15_metadata(bytes(serialized["metadata_v15"]))
         return cls(
             chain=serialized["chain"],
             metadata=metadata,
             type_registry=serialized["type_registry"],
             runtime_config=runtime_config,
-            metadata_v15=MetadataV15.decode_from_metadata_option(
-                serialized["metadata_v15"]
-            ),
-            registry=registry,
+            metadata_v15=metadata_v15,
             ss58_format=ss58_format,
             runtime_info=serialized["runtime_info"],
         )
@@ -394,11 +427,14 @@ class Runtime:
 
     def load_registry_type_map(self) -> None:
         """
-        Loads the runtime's type mapping according to registry
+        Loads the runtime's type mapping according to the portable registry from V14 metadata.
         """
         registry_type_map = {}
         type_id_to_name = {}
-        types = json.loads(self.registry.registry)["types"]
+        types = [
+            st.value
+            for st in self.metadata.portable_registry.value_object["types"].value_object
+        ]
         type_by_id = {entry["id"]: entry for entry in types}
 
         # Pass 1: Gather simple types
@@ -500,38 +536,6 @@ class Runtime:
 
         self.registry_type_map = registry_type_map
         self.type_id_to_name = type_id_to_name
-
-    def get_v15_storage_type_id(
-        self, pallet: str, storage_function: str
-    ) -> Optional[int]:
-        """
-        Returns the V15 type ID for a given pallet storage function.
-        V14 and V15 metadata may have different portable type registry numbering,
-        so using V15 type IDs ensures correct decoding with the V15 PortableRegistry.
-        """
-        if self.metadata_v15 is None:
-            return None
-        if self._v15_storage_type_map is None:
-            self._v15_storage_type_map = {}
-            try:
-                v15_json = json.loads(self.metadata_v15.to_json())
-                for p in v15_json.get("pallets", []):
-                    storage = p.get("storage")
-                    if not storage:
-                        continue
-                    for entry in storage.get("entries", []):
-                        ty = entry.get("ty", {})
-                        if "Plain" in ty:
-                            self._v15_storage_type_map[(p["name"], entry["name"])] = ty[
-                                "Plain"
-                            ]
-                        elif "Map" in ty:
-                            self._v15_storage_type_map[(p["name"], entry["name"])] = ty[
-                                "Map"
-                            ]["value"]
-            except Exception:
-                pass
-        return self._v15_storage_type_map.get((pallet, storage_function))
 
 
 RequestResults = dict[Union[str, int], list[Union[ScaleType, dict]]]

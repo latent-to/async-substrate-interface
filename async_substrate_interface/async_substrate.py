@@ -26,7 +26,6 @@ from typing import (
 
 import scalecodec
 import websockets.exceptions
-from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
 from scalecodec import GenericVariant
 from scalecodec.base import ScaleBytes, ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
@@ -73,9 +72,12 @@ from async_substrate_interface.utils.cache import (
 )
 from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
-    _bt_decode_to_dict_or_list,
     legacy_scale_decode,
     decode_query_map_async,
+)
+from async_substrate_interface.types import (
+    _decode_option_opaque_metadata,
+    _decode_v15_metadata,
 )
 from async_substrate_interface.utils.storage import StorageKey
 from async_substrate_interface.type_registry import _TYPE_REGISTRY
@@ -1459,9 +1461,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 return self.last_block_hash
         return block_hash
 
-    async def _load_registry_at_block(
-        self, block_hash: Optional[str]
-    ) -> tuple[Optional[MetadataV15], Optional[PortableRegistry]]:
+    async def _load_registry_at_block(self, block_hash: Optional[str]):
         # Should be called for any block that fails decoding.
         # Possibly the metadata was different.
         try:
@@ -1475,14 +1475,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 "Client error: Execution failed: Other: Exported method Metadata_metadata_at_version is not found"
                 in e.args
             ):
-                return None, None
+                return None
             else:
                 raise e
         metadata_option_hex_str = metadata_rpc_result["result"]
         metadata_option_bytes = bytes.fromhex(metadata_option_hex_str[2:])
-        metadata = MetadataV15.decode_from_metadata_option(metadata_option_bytes)
-        registry = PortableRegistry.from_metadata_v15(metadata)
-        return metadata, registry
+        inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
+        if inner_bytes is None:
+            return None
+        return _decode_v15_metadata(inner_bytes)
 
     async def encode_scale(
         self,
@@ -1546,7 +1547,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         else:
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
-            if runtime.metadata_v15 is not None and force_legacy is False:
+            if runtime.implements_scaleinfo and force_legacy is False:
                 try:
                     obj = await asyncio.to_thread(
                         runtime.runtime_config.batch_decode,
@@ -1555,15 +1556,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     )
                     obj = obj[0]
                 except NotImplementedError:
-                    try:
-                        obj = await asyncio.to_thread(
-                            decode_by_type_string,
-                            type_string,
-                            runtime.registry,
-                            scale_bytes,
-                        )
-                    except ValueError:
-                        obj = legacy_scale_decode(type_string, scale_bytes, runtime)
+                    obj = legacy_scale_decode(type_string, scale_bytes, runtime)
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, runtime)
         if return_scale_obj:
@@ -1660,7 +1653,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 self.get_parent_block_hash(block_hash),
                 self.get_block_number(block_hash),
             )
-        runtime_info, metadata, (metadata_v15, registry) = await asyncio.gather(
+        runtime_info, metadata, metadata_v15 = await asyncio.gather(
             self.get_block_runtime_info(runtime_block_hash),
             self.get_block_metadata(
                 block_hash=runtime_block_hash,
@@ -1690,7 +1683,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
             runtime_config=runtime_config,
             metadata_v15=metadata_v15,
             runtime_info=runtime_info,
-            registry=registry,
             ss58_format=self.ss58_format,
         )
         self.runtime_cache.add_item(
@@ -2483,13 +2475,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash=block_hash,
             force_legacy_decode=True,
         )
-        # bt-decode Metadata V15 is not ideal for events. Force legacy decoding for this
+        # Force legacy decoding for events
         if storage_obj:
             for item in list(storage_obj):
                 events.append(item)
         return events
 
-    async def get_metadata(self, block_hash=None) -> MetadataV15:
+    async def get_metadata(self, block_hash=None):
         """
         Returns `MetadataVersioned` object for given block_hash or chaintip if block_hash is omitted
 
@@ -2647,10 +2639,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # SCALE type string of value
         param_types = storage_item.get_params_type_string()
         value_scale_type = storage_item.get_value_type_string()
-        # V14 and V15 metadata may have different portable type registry numbering.
-        # Use V15 type ID when available to ensure correct decoding with the V15 registry.
-        if v15_type_id := runtime.get_v15_storage_type_id(module, storage_function):
-            value_scale_type = f"scale_info::{v15_type_id}"
 
         if len(params) != len(param_types):
             raise ValueError(
@@ -3465,7 +3453,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         if "encoder" in runtime_call_def:
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
-            param_data = runtime_call_def["encoder"](params, runtime.registry)
+            param_data = runtime_call_def["encoder"](params, runtime)
         else:
             for idx, param in enumerate(runtime_call_def["params"]):
                 param_type_string = f"{param['type']}"
@@ -3502,10 +3490,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
             raw_bytes = hex_to_bytes(result_bytes)
         else:
             raw_bytes = bytes(result_bytes)
-        result_decoded = runtime_call_def["decoder"](raw_bytes)
-        as_dict = _bt_decode_to_dict_or_list(result_decoded)
-        logger.debug("Decoded old runtime call result: ", as_dict)
-        result_obj = ScaleObj(as_dict)
+        result_decoded = runtime_call_def["decoder"](raw_bytes, runtime)
+        logger.debug("Decoded old runtime call result: ", result_decoded)
+        result_obj = ScaleObj(result_decoded)
 
         return result_obj
 
@@ -3547,7 +3534,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 )
 
             else:
-                metadata_v15_value = runtime.metadata_v15.value()
+                metadata_v15_value = (
+                    runtime.metadata_v15.get_metadata().value_object[1].value
+                )
 
                 apis = {entry["name"]: entry for entry in metadata_v15_value["apis"]}
                 api_entry = apis[api]
