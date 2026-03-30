@@ -711,7 +711,7 @@ class SubstrateInterface(SubstrateMixin):
                 return self.last_block_hash
         return block_hash
 
-    def _load_registry_at_block(self, block_hash: Optional[str]):
+    def _load_registry_at_block(self, block_hash: Optional[str], runtime_config=None):
         # Should be called for any block that fails decoding.
         # Possibly the metadata was different.
         try:
@@ -733,7 +733,7 @@ class SubstrateInterface(SubstrateMixin):
         inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
         if inner_bytes is None:
             return None
-        return _decode_v15_metadata(inner_bytes)
+        return _decode_v15_metadata(inner_bytes, runtime_config=runtime_config)
 
     def decode_scale(
         self,
@@ -877,25 +877,26 @@ class SubstrateInterface(SubstrateMixin):
         block_number = self.get_block_number(block_hash)
         runtime_info = self.get_block_runtime_info(runtime_block_hash)
 
-        metadata = self.get_block_metadata(block_hash=runtime_block_hash, decode=True)
-        if metadata is None:
-            # does this ever happen?
-            raise SubstrateRequestException(
-                f"No metadata for block '{runtime_block_hash}'"
-            )
-        logger.debug(
-            "Retrieved metadata for {} from Substrate node".format(runtime_version)
+        metadata_v15 = self._load_registry_at_block(
+            block_hash=runtime_block_hash, runtime_config=self.runtime_config
         )
-
-        metadata_v15 = self._load_registry_at_block(block_hash=runtime_block_hash)
         if metadata_v15 is not None:
+            # V15 is a superset of V14; use it directly, skipping the V14 fetch
+            metadata = metadata_v15
             logger.debug(
-                f"Retrieved metadata and metadata v15 for {runtime_version} from Substrate node"
+                f"Retrieved metadata v15 for {runtime_version} from Substrate node"
             )
         else:
+            metadata = self.get_block_metadata(
+                block_hash=runtime_block_hash, decode=True
+            )
             logger.debug(
-                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. This indicates the "
-                f"block is quite old, decoding for this block will use legacy Python decoding."
+                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. "
+                f"This indicates the block is quite old, decoding for this block will use legacy Python decoding."
+            )
+        if metadata is None:
+            raise SubstrateRequestException(
+                f"No metadata for block '{runtime_block_hash}'"
             )
 
         runtime = Runtime(
@@ -1778,13 +1779,6 @@ class SubstrateInterface(SubstrateMixin):
         # SCALE type string of value
         param_types = storage_item.get_params_type_string()
         value_scale_type = storage_item.get_value_type_string()
-        # V14 and V15 metadata may have different portable type registry numbering.
-        # Use V15 type ID when available to ensure correct decoding with the V15 registry.
-        if v15_type_id := self.runtime.get_v15_storage_type_id(
-            module, storage_function
-        ):
-            value_scale_type = f"scale_info::{v15_type_id}"
-
         if len(params) != len(param_types):
             raise ValueError(
                 f"Storage function requires {len(param_types)} parameters, {len(params)} given"

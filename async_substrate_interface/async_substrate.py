@@ -1461,7 +1461,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 return self.last_block_hash
         return block_hash
 
-    async def _load_registry_at_block(self, block_hash: Optional[str]):
+    async def _load_registry_at_block(
+        self, block_hash: Optional[str], runtime_config=None
+    ):
         # Should be called for any block that fails decoding.
         # Possibly the metadata was different.
         try:
@@ -1483,7 +1485,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
         if inner_bytes is None:
             return None
-        return _decode_v15_metadata(inner_bytes)
+        return _decode_v15_metadata(inner_bytes, runtime_config=runtime_config)
 
     async def encode_scale(
         self,
@@ -1653,28 +1655,31 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 self.get_parent_block_hash(block_hash),
                 self.get_block_number(block_hash),
             )
-        runtime_info, metadata, metadata_v15 = await asyncio.gather(
+        runtime_info, metadata_v15 = await asyncio.gather(
             self.get_block_runtime_info(runtime_block_hash),
-            self.get_block_metadata(
+            self._load_registry_at_block(
+                block_hash=runtime_block_hash, runtime_config=runtime_config
+            ),
+        )
+        if metadata_v15 is not None:
+            # V15 is a superset of V14; use it directly, skipping the V14 fetch
+            metadata = metadata_v15
+            logger.debug(
+                f"Retrieved metadata v15 for {runtime_version} from Substrate node"
+            )
+        else:
+            metadata = await self.get_block_metadata(
                 block_hash=runtime_block_hash,
                 runtime_config=runtime_config,
                 decode=True,
-            ),
-            self._load_registry_at_block(block_hash=runtime_block_hash),
-        )
+            )
+            logger.debug(
+                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. "
+                f"This indicates the block is quite old, decoding for this block will use legacy Python decoding."
+            )
         if metadata is None:
-            # does this ever happen?
             raise SubstrateRequestException(
                 f"No metadata for block '{runtime_block_hash}'"
-            )
-        if metadata_v15 is not None:
-            logger.debug(
-                f"Retrieved metadata and metadata v15 for {runtime_version} from Substrate node"
-            )
-        else:
-            logger.debug(
-                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. This indicates the "
-                f"block is quite old, decoding for this block will use legacy Python decoding."
             )
         runtime = Runtime(
             chain=self.chain,

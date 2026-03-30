@@ -2,9 +2,46 @@ from collections import namedtuple
 from typing import TYPE_CHECKING, Union
 
 from scalecodec import ss58_decode
+from scalecodec.base import ScaleBytes, RuntimeConfigurationObject
+from scalecodec.type_registry import load_type_registry_preset
 
 if TYPE_CHECKING:
     from async_substrate_interface.types import Runtime
+
+# Bittensor-specific types needed for legacy (pre-V15) blocks
+_BITTENSOR_LEGACY_TYPES = {
+    "types": {
+        "Balance": "u64",
+        "StakeInfo": {
+            "type": "struct",
+            "type_mapping": [
+                ["hotkey", "AccountId"],
+                ["coldkey", "AccountId"],
+                ["stake", "Compact<u64>"],
+            ],
+        },
+    }
+}
+
+_legacy_rc: RuntimeConfigurationObject | None = None
+
+
+def _get_legacy_rc(ss58_format: int | None = None) -> RuntimeConfigurationObject:
+    """Return a lazily-initialised RC with legacy + Bittensor types."""
+    global _legacy_rc
+    if _legacy_rc is None:
+        rc = RuntimeConfigurationObject(ss58_format=ss58_format)
+        rc.update_type_registry(load_type_registry_preset(name="legacy"))
+        rc.update_type_registry(_BITTENSOR_LEGACY_TYPES)
+        _legacy_rc = rc
+    return _legacy_rc
+
+
+def _legacy_decode(type_string: str, raw_bytes: bytes, ss58_format: int):
+    """Decode raw_bytes using the legacy scalecodec type registry."""
+    rc = _get_legacy_rc(ss58_format=ss58_format)
+    obj = rc.create_scale_object(type_string, data=ScaleBytes(raw_bytes))
+    return obj.decode()
 
 
 def _cyscale_decode(type_name: str, raw_bytes: bytes, runtime: "Runtime"):
@@ -20,7 +57,7 @@ def _cyscale_decode(type_name: str, raw_bytes: bytes, runtime: "Runtime"):
 def stake_info_decode_vec_legacy_compatibility(
     raw_bytes: bytes, runtime: "Runtime"
 ) -> list[dict[str, Union[str, int, bytes, bool]]]:
-    stake_infos = _cyscale_decode("Vec<StakeInfo>", raw_bytes, runtime)
+    ss58_format = runtime.ss58_format
     NewStakeInfo = namedtuple(
         "NewStakeInfo",
         [
@@ -34,6 +71,8 @@ def stake_info_decode_vec_legacy_compatibility(
             "is_registered",
         ],
     )
+
+    stake_infos = _legacy_decode("Vec<StakeInfo>", raw_bytes, ss58_format=ss58_format)
     return [
         NewStakeInfo(
             0,
@@ -44,7 +83,7 @@ def stake_info_decode_vec_legacy_compatibility(
             0,
             0,
             False,
-        )
+        )._asdict()
         for si in stake_infos
     ]
 

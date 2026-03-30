@@ -213,10 +213,22 @@ def _decode_option_opaque_metadata(data: bytes) -> Optional[bytes]:
     return data[offset : offset + length]
 
 
-def _decode_v15_metadata(raw_metadata_bytes: bytes):
-    """Decode raw V15 metadata bytes (magic+version+body) using a fresh cyscale RuntimeConfigurationObject."""
-    rc = RuntimeConfigurationObject()
-    rc.update_type_registry(load_type_registry_preset(name="core"))
+def _decode_v15_metadata(
+    raw_metadata_bytes: bytes,
+    runtime_config: Optional["RuntimeConfigurationObject"] = None,
+):
+    """Decode raw V15 metadata bytes (magic+version+body).
+
+    If *runtime_config* is supplied the metadata objects will share that RC,
+    so that storage-item helpers (e.g. get_params_type_string) can look up
+    scale_info:: types after add_portable_registry has been called on it.
+    Otherwise a fresh RC is used (safe for deserialisation / standalone use).
+    """
+    if runtime_config is None:
+        rc = RuntimeConfigurationObject()
+        rc.update_type_registry(load_type_registry_preset(name="core"))
+    else:
+        rc = runtime_config
     meta_obj = rc.create_scale_object(
         "MetadataVersioned", data=ScaleBytes(raw_metadata_bytes)
     )
@@ -271,9 +283,11 @@ class Runtime:
 
     def serialize(self):
         metadata_value = self.metadata.data.data
-        # Serialize V15 metadata as raw bytes if available
+        # Only serialize metadata_v15 separately if it is a distinct object from metadata
+        # (i.e., old code path where V14 was metadata and V15 was separate).
+        # When V15 is available, metadata IS metadata_v15, so no redundant bytes.
         metadata_v15_bytes = None
-        if self.metadata_v15 is not None:
+        if self.metadata_v15 is not None and self.metadata_v15 is not self.metadata:
             metadata_v15_bytes = list(self.metadata_v15.data.data)
         return {
             "chain": self.chain,
@@ -301,7 +315,17 @@ class Runtime:
         metadata.decode()
         metadata_v15 = None
         if serialized.get("metadata_v15"):
-            metadata_v15 = _decode_v15_metadata(bytes(serialized["metadata_v15"]))
+            v15_bytes = bytes(serialized["metadata_v15"])
+            # Old bt_decode format: stored as Option<OpaqueMetadata> (starts with 0x01).
+            # New format: raw MetadataVersioned bytes (starts with 'meta' magic 0x6d657461).
+            _METADATA_MAGIC = b"\x6d\x65\x74\x61"
+            if v15_bytes[:4] != _METADATA_MAGIC:
+                v15_bytes = _decode_option_opaque_metadata(v15_bytes)
+            if v15_bytes is not None:
+                metadata_v15 = _decode_v15_metadata(v15_bytes)
+        elif metadata.get_metadata().index >= 15:
+            # metadata itself is V15 (stored as metadata_value); use it as metadata_v15 too
+            metadata_v15 = metadata
         return cls(
             chain=serialized["chain"],
             metadata=metadata,
