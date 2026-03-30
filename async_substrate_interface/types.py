@@ -16,7 +16,6 @@ from scalecodec.type_registry import load_type_registry_preset
 from scalecodec.types import GenericCall, ScaleType, MultiAccountId
 
 from .const import SS58_FORMAT
-from .utils import json
 from .utils.cache import AsyncSqliteDB, LRUCache
 
 logger = logging.getLogger("async_substrate_interface")
