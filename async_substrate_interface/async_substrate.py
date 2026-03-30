@@ -3369,7 +3369,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             signature_version = keypair.crypto_type
 
             # Sign payload
-            signature = keypair.sign(signature_payload)
+            signature = keypair.sign(signature_payload.data)
             if inspect.isawaitable(signature):
                 signature = await signature
 

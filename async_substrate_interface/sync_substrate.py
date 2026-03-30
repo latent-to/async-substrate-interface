@@ -2460,7 +2460,7 @@ class SubstrateInterface(SubstrateMixin):
             signature_version = keypair.crypto_type
 
             # Sign payload
-            signature = keypair.sign(signature_payload)
+            signature = keypair.sign(signature_payload.data)
 
         # Create extrinsic
         extrinsic = self.runtime_config.create_scale_object(
