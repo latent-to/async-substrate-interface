@@ -9,7 +9,7 @@ keywords = ["substrate", "development", "bittensor"]
 dependencies = [
   "wheel",
   "aiosqlite>=0.21.0,<1.0.0",
-  "cyscale",
+  "cyscale==0.1.1",
   "websockets>=14.1",
   "xxhash",
   "ruff==0.11.5",
@@ -63,6 +63,3 @@ dev = [
     "bittensor-wallet>=4.0.0",
     "pytest-forked"
 ]
-
-[tool.uv.sources]
-cyscale = { path = "../cy-scale-codec", editable = true }
