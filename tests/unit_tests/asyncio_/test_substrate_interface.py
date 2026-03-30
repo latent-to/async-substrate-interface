@@ -37,7 +37,7 @@ async def test_runtime_call(monkeypatch):
 
     fake_runtime = MagicMock()
     fake_metadata_v15 = MagicMock()
-    fake_metadata_v15.value.return_value = {
+    fake_metadata_v15.get_metadata.return_value.value_object[1].value = {
         "apis": [
             {
                 "name": "SubstrateApi",
