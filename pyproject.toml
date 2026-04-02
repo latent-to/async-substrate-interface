@@ -9,7 +9,7 @@ keywords = ["substrate", "development", "bittensor"]
 dependencies = [
   "wheel",
   "aiosqlite>=0.21.0,<1.0.0",
-  "cyscale==0.1.1",
+  "cyscale==0.1.4",
   "websockets>=14.1",
   "xxhash",
   "ruff==0.11.5",
@@ -46,6 +46,11 @@ Repository = "https://github.com/opentensor/async-substrate-interface/"
 
 [tool.setuptools.package-data]
 async_substrate_interface = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "module"
+
 
 [build-system]
 requires = ["setuptools>=70.0", "wheel"]
