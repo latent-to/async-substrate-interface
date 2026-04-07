@@ -44,6 +44,9 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/opentensor/async-substrate-interface/"
 
+[tool.setuptools.packages.find]
+exclude = ["tests*"]
+
 [tool.setuptools.package-data]
 async_substrate_interface = ["py.typed"]
 
