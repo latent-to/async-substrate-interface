@@ -1543,6 +1543,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         """
         if scale_bytes == b"":
             return None
+        # TODO can probably remove this
         if type_string == "scale_info::0":  # Is an AccountId
             # Decode AccountId bytes to SS58 address
             return ss58_encode(scale_bytes, self.ss58_format)
@@ -1551,12 +1552,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 runtime = await self.init_runtime(block_hash=block_hash)
             if runtime.implements_scaleinfo and force_legacy is False:
                 try:
-                    obj = await asyncio.to_thread(
-                        runtime.runtime_config.batch_decode,
+                    obj_ = runtime.runtime_config.batch_decode(
                         [type_string],
-                        [scale_bytes],
-                    )
-                    obj = obj[0]
+                        [scale_bytes])
+                    obj = obj_[0]
                 except NotImplementedError:
                     obj = legacy_scale_decode(type_string, scale_bytes, runtime)
             else:
