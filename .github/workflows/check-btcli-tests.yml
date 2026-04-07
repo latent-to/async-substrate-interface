@@ -255,4 +255,6 @@ jobs:
 
       - name: Run BTCLI unit tests
         working-directory: ${{ github.workspace }}/btcli
+        env:
+          PYTHONPATH: ${{ github.workspace }}/btcli
         run: pytest tests/unit_tests
