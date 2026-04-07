@@ -96,13 +96,13 @@ jobs:
     steps:
       - name: Research preparation
         working-directory: ${{ github.workspace }}
-        run: git clone https://github.com/opentensor/bittensor.git
+        run: git clone https://github.com/latent-to/bittensor.git
 
       - name: Verify and checkout Bittensor branch
         working-directory: ${{ github.workspace }}/bittensor
         run: |
           if ! git fetch origin $BITTENSOR_BRANCH; then
-            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in opentensor/bittensor."
+            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in latent-to/bittensor."
             exit 1
           fi
           git checkout FETCH_HEAD
@@ -188,13 +188,13 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Clone Bittensor SDK repo
-        run: git clone https://github.com/opentensor/bittensor.git
+        run: git clone https://github.com/latent-to/bittensor.git
 
       - name: Checkout Bittensor branch
         working-directory: ${{ github.workspace }}/bittensor
         run: |
           if ! git fetch origin $BITTENSOR_BRANCH; then
-            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in opentensor/bittensor."
+            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in latent-to/bittensor."
             exit 1
           fi
           git checkout FETCH_HEAD
@@ -205,13 +205,13 @@ jobs:
         run: uv pip install --system '.[dev]'
 
       - name: Clone async-substrate-interface repo
-        run: git clone https://github.com/opentensor/async-substrate-interface.git
+        run: git clone https://github.com/latent-to/async-substrate-interface.git
 
       - name: Checkout PR branch in async-substrate-interface
         working-directory: ${{ github.workspace }}/async-substrate-interface
         run: |
           BRANCH="${{ github.event.pull_request.head.ref || github.ref_name }}"
-          REPO_URL="${{ github.event.pull_request.head.repo.clone_url || 'https://github.com/opentensor/async-substrate-interface.git' }}"
+          REPO_URL="${{ github.event.pull_request.head.repo.clone_url || 'https://github.com/latent-to/async-substrate-interface.git' }}"
           git fetch $REPO_URL $BRANCH
           git checkout FETCH_HEAD
           echo "Current SHA: $(git rev-parse HEAD)"
@@ -257,13 +257,13 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Clone Bittensor SDK repo
-        run: git clone https://github.com/opentensor/bittensor.git
+        run: git clone https://github.com/latent-to/bittensor.git
 
       - name: Checkout Bittensor branch
         working-directory: ${{ github.workspace }}/bittensor
         run: |
           if ! git fetch origin $BITTENSOR_BRANCH; then
-            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in opentensor/bittensor."
+            echo "❌ Error: Branch '$BITTENSOR_BRANCH' does not exist in latent-to/bittensor."
             exit 1
           fi
           git checkout FETCH_HEAD
@@ -274,7 +274,7 @@ jobs:
         run: uv pip install --system '.[dev]' torch
 
       - name: Clone async-substrate-interface repo
-        run: git clone https://github.com/opentensor/async-substrate-interface.git
+        run: git clone https://github.com/latent-to/async-substrate-interface.git
 
       - name: Checkout PR branch in async-substrate-interface
         working-directory: ${{ github.workspace }}/async-substrate-interface

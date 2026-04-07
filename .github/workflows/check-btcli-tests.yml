@@ -79,7 +79,7 @@ jobs:
     steps:
       - name: Research preparation
         working-directory: ${{ github.workspace }}
-        run: git clone https://github.com/opentensor/btcli.git
+        run: git clone https://github.com/latent-to/btcli.git
 
       - name: Checkout
         working-directory: ${{ github.workspace }}/btcli
@@ -162,7 +162,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Clone Bittensor CLI repo
-        run: git clone https://github.com/opentensor/btcli.git
+        run: git clone https://github.com/latent-to/btcli.git
 
       - name: Checkout btcli staging branch
         working-directory: ${{ github.workspace }}/btcli
@@ -175,7 +175,7 @@ jobs:
         run: uv pip install --system '.[dev]'
 
       - name: Clone async-substrate-interface repo
-        run: git clone https://github.com/opentensor/async-substrate-interface.git
+        run: git clone https://github.com/latent-to/async-substrate-interface.git
 
       - name: Checkout PR branch in async-substrate-interface
         working-directory: ${{ github.workspace }}/async-substrate-interface
@@ -225,7 +225,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Clone Bittensor CLI repo
-        run: git clone https://github.com/opentensor/btcli.git
+        run: git clone https://github.com/latent-to/btcli.git
 
       - name: Checkout btcli staging branch
         working-directory: ${{ github.workspace }}/btcli
@@ -238,7 +238,7 @@ jobs:
         run: uv pip install --system '.[dev]'
 
       - name: Clone async-substrate-interface repo
-        run: git clone https://github.com/opentensor/async-substrate-interface.git
+        run: git clone https://github.com/latent-to/async-substrate-interface.git
 
       - name: Checkout PR branch in async-substrate-interface
         working-directory: ${{ github.workspace }}/async-substrate-interface
