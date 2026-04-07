@@ -211,9 +211,10 @@ jobs:
         working-directory: ${{ github.workspace }}/async-substrate-interface
         run: |
           BRANCH="${{ github.event.pull_request.head.ref || github.ref_name }}"
-          git fetch origin $BRANCH
-          git checkout $BRANCH
-          echo "Current branch: $(git rev-parse --abbrev-ref HEAD)"
+          REPO_URL="${{ github.event.pull_request.head.repo.clone_url || 'https://github.com/opentensor/async-substrate-interface.git' }}"
+          git fetch $REPO_URL $BRANCH
+          git checkout FETCH_HEAD
+          echo "Current SHA: $(git rev-parse HEAD)"
 
       - name: Install async-substrate-interface with dev dependencies
         working-directory: ${{ github.workspace }}/async-substrate-interface
@@ -278,9 +279,9 @@ jobs:
       - name: Checkout PR branch in async-substrate-interface
         working-directory: ${{ github.workspace }}/async-substrate-interface
         run: |
-          git fetch origin ${{ github.event.pull_request.head.ref }}
-          git checkout ${{ github.event.pull_request.head.ref }}
-          echo "Current branch: $(git rev-parse --abbrev-ref HEAD)"
+          git fetch ${{ github.event.pull_request.head.repo.clone_url }} ${{ github.event.pull_request.head.ref }}
+          git checkout FETCH_HEAD
+          echo "Current SHA: $(git rev-parse HEAD)"
 
       - name: Install async-substrate-interface with dev dependencies
         working-directory: ${{ github.workspace }}/async-substrate-interface
