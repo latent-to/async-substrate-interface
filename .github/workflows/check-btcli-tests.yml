@@ -224,19 +224,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Clone Bittensor CLI repo
-        run: git clone https://github.com/latent-to/btcli.git
-
-      - name: Checkout btcli staging branch
-        working-directory: ${{ github.workspace }}/btcli
-        run: |
-          git checkout staging
-          git fetch origin staging
-
-      - name: Install btcli dependencies
-        working-directory: ${{ github.workspace }}/btcli
-        run: uv pip install --system '.[dev]'
-
       - name: Clone async-substrate-interface repo
         run: git clone https://github.com/latent-to/async-substrate-interface.git
 
@@ -249,9 +236,20 @@ jobs:
 
       - name: Install async-substrate-interface with dev dependencies
         working-directory: ${{ github.workspace }}/async-substrate-interface
+        run: uv pip install --system '.[dev]'
+
+      - name: Clone Bittensor CLI repo
+        run: git clone https://github.com/latent-to/btcli.git
+
+      - name: Checkout btcli staging branch
+        working-directory: ${{ github.workspace }}/btcli
         run: |
-          uv pip uninstall --system async-substrate-interface || true
-          uv pip install --system '.[dev]'
+          git checkout staging
+          git fetch origin staging
+
+      - name: Install btcli dependencies
+        working-directory: ${{ github.workspace }}/btcli
+        run: uv pip install --system '.[dev]'
 
       - name: Run BTCLI unit tests
         working-directory: ${{ github.workspace }}/btcli
