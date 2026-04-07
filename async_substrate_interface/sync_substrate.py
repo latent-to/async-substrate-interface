@@ -51,6 +51,16 @@ from async_substrate_interface.utils.decoding import (
     decode_query_map,
     legacy_scale_decode,
 )
+from async_substrate_interface.utils.receipt import (
+    build_system_error_message,
+    extract_failure_details,
+    extract_fallback_deposit_fee_amount,
+    extract_success_weight,
+    extract_total_fee_amount,
+    is_extrinsic_failure_event,
+    is_extrinsic_success_event,
+    normalize_module_error,
+)
 from async_substrate_interface.utils.storage import StorageKey
 from async_substrate_interface.type_registry import _TYPE_REGISTRY
 
@@ -224,133 +234,58 @@ class ExtrinsicReceipt:
         if self.triggered_events:
             self.__total_fee_amount = 0
 
-            # Process fees
-            has_transaction_fee_paid_event = False
-
-            for event in self.triggered_events:
-                if (
-                    event["event"]["module_id"] == "TransactionPayment"
-                    and event["event"]["event_id"] == "TransactionFeePaid"
-                ):
-                    self.__total_fee_amount = event["event"]["attributes"]["actual_fee"]
-                    has_transaction_fee_paid_event = True
+            self.__total_fee_amount, has_transaction_fee_paid_event = (
+                extract_total_fee_amount(self.triggered_events)
+            )
 
             # Process other events
             possible_success = False
             for event in self.triggered_events:
-                # TODO make this more readable
-                # Check events
-                if (
-                    event["event"]["module_id"] == "System"
-                    and event["event"]["event_id"] == "ExtrinsicSuccess"
-                ):
+                if is_extrinsic_success_event(event):
                     possible_success = True
-
-                    if "dispatch_info" in event["event"]["attributes"]:
-                        self.__weight = event["event"]["attributes"]["dispatch_info"][
-                            "weight"
-                        ]
-                    else:
-                        # Backwards compatibility
-                        self.__weight = event["event"]["attributes"]["weight"]
-
-                elif (
-                    event["event"]["module_id"] == "System"
-                    and event["event"]["event_id"] == "ExtrinsicFailed"
-                ) or (
-                    event["event"]["module_id"] == "MevShield"
-                    and event["event"]["event_id"]
-                    in ("DecryptedRejected", "DecryptionFailed")
-                ):
+                    self.__weight = extract_success_weight(event)
+                elif is_extrinsic_failure_event(event):
                     possible_success = False
                     self.__is_success = False
+                    failure_details = extract_failure_details(event)
+                    if failure_details["has_weight"]:
+                        self.__weight = failure_details["weight"]
+                    if failure_details["error_message"] is not None:
+                        self.__error_message = failure_details["error_message"]
+                        continue
 
-                    if event["event"]["module_id"] == "System":
-                        dispatch_info = event["event"]["attributes"]["dispatch_info"]
-                        dispatch_error = event["event"]["attributes"]["dispatch_error"]
-                        self.__weight = dispatch_info["weight"]
-                    else:
-                        # MEV shield extrinsics
-                        if event["event"]["event_id"] == "DecryptedRejected":
-                            dispatch_info = event["event"]["attributes"]["reason"][
-                                "post_info"
-                            ]
-                            dispatch_error = event["event"]["attributes"]["reason"][
-                                "error"
-                            ]
-                            self.__weight = event["event"]["attributes"]["reason"][
-                                "post_info"
-                            ]["actual_weight"]
-                        else:
-                            self.__error_message = {
-                                "type": "MevShield",
-                                "name": "DecryptionFailed",
-                                "docs": event["event"]["attributes"]["reason"],
-                            }
-                            continue
+                    dispatch_error = failure_details["dispatch_error"]
+                    if dispatch_error is None:
+                        continue
 
-                    if "Module" in dispatch_error:
-                        if isinstance(dispatch_error["Module"], tuple):
-                            module_index = dispatch_error["Module"][0]
-                            error_index = dispatch_error["Module"][1]
-                        else:
-                            module_index = dispatch_error["Module"]["index"]
-                            error_index = dispatch_error["Module"]["error"]
-
-                        if isinstance(error_index, str):
-                            # Actual error index is first u8 in new [u8; 4] format
-                            error_index = int(error_index[2:4], 16)
-
-                        module_error = self.substrate.metadata.get_module_error(
-                            module_index=module_index, error_index=error_index
+                    module_error = normalize_module_error(dispatch_error)
+                    if module_error is not None:
+                        self.__error_message = self._resolve_module_error_message(
+                            module_index=module_error["module_index"],
+                            error_index=module_error["error_index"],
                         )
-                        self.__error_message = {
-                            "type": "Module",
-                            "name": module_error.name,
-                            "docs": module_error.docs,
-                        }
-                    elif "BadOrigin" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "BadOrigin",
-                            "docs": "Bad origin",
-                        }
-                    elif "CannotLookup" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "CannotLookup",
-                            "docs": "Cannot lookup",
-                        }
-                    elif "Other" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "Other",
-                            "docs": "Unspecified error occurred",
-                        }
-                    elif "Token" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "Token",
-                            "docs": dispatch_error["Token"],
-                        }
-
+                    else:
+                        self.__error_message = build_system_error_message(
+                            dispatch_error
+                        )
                 elif not has_transaction_fee_paid_event:
-                    if (
-                        event["event"]["module_id"] == "Treasury"
-                        and event["event"]["event_id"] == "Deposit"
-                    ):
-                        self.__total_fee_amount += event["event"]["attributes"]["value"]
-                    elif (
-                        event["event"]["module_id"] == "Balances"
-                        and event["event"]["event_id"] == "Deposit"
-                    ):
-                        self.__total_fee_amount += event["event"]["attributes"][
-                            "amount"
-                        ]
+                    self.__total_fee_amount += extract_fallback_deposit_fee_amount(
+                        event
+                    )
             if possible_success is True and self.__error_message is None:
                 # we delay the positive setting of the __is_success flag until we have finished iteration of the
                 # events and have ensured nothing has set an error message
                 self.__is_success = True
+
+    def _resolve_module_error_message(self, module_index: int, error_index: int) -> dict:
+        module_error = self.substrate.metadata.get_module_error(
+            module_index=module_index, error_index=error_index
+        )
+        return {
+            "type": "Module",
+            "name": module_error.name,
+            "docs": module_error.docs,
+        }
 
     @property
     def is_success(self) -> bool:

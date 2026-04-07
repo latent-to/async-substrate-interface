@@ -26,6 +26,7 @@ from typing import (
 
 import scalecodec
 import websockets.exceptions
+from bt_decode import MetadataV15, PortableRegistry, decode as decode_by_type_string
 from scalecodec import GenericVariant
 from scalecodec.base import ScaleBytes, ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
@@ -72,12 +73,20 @@ from async_substrate_interface.utils.cache import (
 )
 from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
+    _bt_decode_to_dict_or_list,
     legacy_scale_decode,
+    convert_account_ids,
     decode_query_map_async,
 )
-from async_substrate_interface.types import (
-    _decode_option_opaque_metadata,
-    _decode_v15_metadata,
+from async_substrate_interface.utils.receipt import (
+    build_system_error_message,
+    extract_failure_details,
+    extract_fallback_deposit_fee_amount,
+    extract_success_weight,
+    extract_total_fee_amount,
+    is_extrinsic_failure_event,
+    is_extrinsic_success_event,
+    normalize_module_error,
 )
 from async_substrate_interface.utils.storage import StorageKey
 from async_substrate_interface.type_registry import _TYPE_REGISTRY
@@ -262,141 +271,68 @@ class AsyncExtrinsicReceipt:
         if await self.triggered_events:
             self.__total_fee_amount = 0
 
-            # Process fees
-            has_transaction_fee_paid_event = False
-
-            for event in await self.triggered_events:
-                if (
-                    event["event"]["module_id"] == "TransactionPayment"
-                    and event["event"]["event_id"] == "TransactionFeePaid"
-                ):
-                    self.__total_fee_amount = event["event"]["attributes"]["actual_fee"]
-                    has_transaction_fee_paid_event = True
+            events = await self.triggered_events
+            self.__total_fee_amount, has_transaction_fee_paid_event = (
+                extract_total_fee_amount(events)
+            )
 
             # Process other events
             possible_success = False
-            for event in await self.triggered_events:
-                # TODO make this more readable
-                # Check events
-                if (
-                    event["event"]["module_id"] == "System"
-                    and event["event"]["event_id"] == "ExtrinsicSuccess"
-                ):
+            for event in events:
+                if is_extrinsic_success_event(event):
                     possible_success = True
-
-                    if "dispatch_info" in event["event"]["attributes"]:
-                        self.__weight = event["event"]["attributes"]["dispatch_info"][
-                            "weight"
-                        ]
-                    else:
-                        # Backwards compatibility
-                        self.__weight = event["event"]["attributes"]["weight"]
-
-                elif (
-                    event["event"]["module_id"] == "System"
-                    and event["event"]["event_id"] == "ExtrinsicFailed"
-                ) or (
-                    event["event"]["module_id"] == "MevShield"
-                    and event["event"]["event_id"]
-                    in ("DecryptedRejected", "DecryptionFailed")
-                ):
+                    self.__weight = extract_success_weight(event)
+                elif is_extrinsic_failure_event(event):
                     possible_success = False
                     self.__is_success = False
+                    failure_details = extract_failure_details(event)
+                    if failure_details["has_weight"]:
+                        self.__weight = failure_details["weight"]
+                    if failure_details["error_message"] is not None:
+                        self.__error_message = failure_details["error_message"]
+                        continue
 
-                    if event["event"]["module_id"] == "System":
-                        dispatch_info = event["event"]["attributes"]["dispatch_info"]
-                        dispatch_error = event["event"]["attributes"]["dispatch_error"]
-                        self.__weight = dispatch_info["weight"]
-                    else:
-                        # MEV shield extrinsics
-                        if event["event"]["event_id"] == "DecryptedRejected":
-                            dispatch_info = event["event"]["attributes"]["reason"][
-                                "post_info"
-                            ]
-                            dispatch_error = event["event"]["attributes"]["reason"][
-                                "error"
-                            ]
-                            self.__weight = event["event"]["attributes"]["reason"][
-                                "post_info"
-                            ]["actual_weight"]
-                        else:
-                            self.__error_message = {
-                                "type": "MevShield",
-                                "name": "DecryptionFailed",
-                                "docs": event["event"]["attributes"]["reason"],
-                            }
-                            continue
+                    dispatch_error = failure_details["dispatch_error"]
+                    if dispatch_error is None:
+                        continue
 
-                    if "Module" in dispatch_error:
-                        if isinstance(dispatch_error["Module"], tuple):
-                            module_index = dispatch_error["Module"][0]
-                            error_index = dispatch_error["Module"][1]
-                        else:
-                            module_index = dispatch_error["Module"]["index"]
-                            error_index = dispatch_error["Module"]["error"]
-
-                        if isinstance(error_index, str):
-                            # Actual error index is first u8 in new [u8; 4] format
-                            error_index = int(error_index[2:4], 16)
-
-                        if self.block_hash:
-                            runtime = await self.substrate.init_runtime(
-                                block_hash=self.block_hash
+                    module_error = normalize_module_error(dispatch_error)
+                    if module_error is not None:
+                        self.__error_message = (
+                            await self._resolve_module_error_message(
+                                module_index=module_error["module_index"],
+                                error_index=module_error["error_index"],
                             )
-                        else:
-                            runtime = await self.substrate.init_runtime(
-                                block_id=self.block_number
-                            )
-                        module_error = runtime.metadata.get_module_error(
-                            module_index=module_index, error_index=error_index
                         )
-                        self.__error_message = {
-                            "type": "Module",
-                            "name": module_error.name,
-                            "docs": module_error.docs,
-                        }
-                    elif "BadOrigin" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "BadOrigin",
-                            "docs": "Bad origin",
-                        }
-                    elif "CannotLookup" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "CannotLookup",
-                            "docs": "Cannot lookup",
-                        }
-                    elif "Other" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "Other",
-                            "docs": "Unspecified error occurred",
-                        }
-                    elif "Token" in dispatch_error:
-                        self.__error_message = {
-                            "type": "System",
-                            "name": "Token",
-                            "docs": dispatch_error["Token"],
-                        }
-
+                    else:
+                        self.__error_message = build_system_error_message(
+                            dispatch_error
+                        )
                 elif not has_transaction_fee_paid_event:
-                    if (
-                        event["event"]["module_id"] == "Treasury"
-                        and event["event"]["event_id"] == "Deposit"
-                    ):
-                        self.__total_fee_amount += event["event"]["attributes"]["value"]
-                    elif (
-                        event["event"]["module_id"] == "Balances"
-                        and event["event"]["event_id"] == "Deposit"
-                    ):
-                        self.__total_fee_amount += event["event"]["attributes"][
-                            "amount"
-                        ]
+                    self.__total_fee_amount += extract_fallback_deposit_fee_amount(
+                        event
+                    )
             if possible_success is True and self.__error_message is None:
                 # we delay the positive setting of the __is_success flag until we have finished iteration of the
                 # events and have ensured nothing has set an error message
                 self.__is_success = True
+
+    async def _resolve_module_error_message(
+        self, module_index: int, error_index: int
+    ) -> dict:
+        if self.block_hash:
+            runtime = await self.substrate.init_runtime(block_hash=self.block_hash)
+        else:
+            runtime = await self.substrate.init_runtime(block_id=self.block_number)
+
+        module_error = runtime.metadata.get_module_error(
+            module_index=module_index, error_index=error_index
+        )
+        return {
+            "type": "Module",
+            "name": module_error.name,
+            "docs": module_error.docs,
+        }
 
     @property
     async def is_success(self) -> bool:
@@ -865,11 +801,11 @@ class Websocket:
                     logger.debug(f"Timed out waiting for cancellation")
                     pass
             logger.debug("Attempting connection")
-            loop = asyncio.get_running_loop()
             try:
                 family, type_, proto, _, sockaddr = await self._resolve_host()
                 tcp_sock = socket.socket(family, type_, proto)
                 tcp_sock.setblocking(False)
+                loop = asyncio.get_running_loop()
                 try:
                     await asyncio.wait_for(
                         loop.sock_connect(tcp_sock, sockaddr), timeout=10.0
@@ -900,7 +836,9 @@ class Websocket:
                 except Exception as e:
                     logger.debug(f"Could not save TLS session: {e}")
             if self._send_recv_task is None or self._send_recv_task.done():
-                self._send_recv_task = loop.create_task(self._handler(self.ws))
+                self._send_recv_task = asyncio.get_running_loop().create_task(
+                    self._handler(self.ws)
+                )
         return None
 
     async def _handler(self, ws: ClientConnection) -> Union[None, Exception]:
@@ -1262,6 +1200,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         _mock: bool = False,
         _log_raw_websockets: bool = False,
         ws_shutdown_timer: Optional[float] = 5.0,
+        decode_ss58: bool = False,
         _ssl_context: Optional[_SessionResumingSSLContext] = None,
         dns_ttl: int = 300,
     ):
@@ -1283,6 +1222,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             _mock: whether to use mock version of the subtensor interface
             _log_raw_websockets: whether to log raw websocket requests during RPC requests
             ws_shutdown_timer: how long after the last connection your websocket should close
+            decode_ss58: Whether to decode AccountIds to SS58 or leave them in raw bytes tuples.
             _ssl_context: optional session-resuming SSL context; used internally by
                 DiskCachedAsyncSubstrateInterface to enable TLS session reuse.
             dns_ttl: seconds to cache DNS results for the websocket URL (default 300). Set to 0
@@ -1294,6 +1234,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             type_registry_preset,
             use_remote_preset,
             ss58_format,
+            decode_ss58,
         )
         self.max_retries = max_retries
         self.retry_timeout = retry_timeout
@@ -1460,8 +1401,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
         return block_hash
 
     async def _load_registry_at_block(
-        self, block_hash: Optional[str], runtime_config=None
-    ):
+        self, block_hash: Optional[str]
+    ) -> tuple[Optional[MetadataV15], Optional[PortableRegistry]]:
         # Should be called for any block that fails decoding.
         # Possibly the metadata was different.
         try:
@@ -1475,15 +1416,14 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 "Client error: Execution failed: Other: Exported method Metadata_metadata_at_version is not found"
                 in e.args
             ):
-                return None
+                return None, None
             else:
                 raise e
         metadata_option_hex_str = metadata_rpc_result["result"]
         metadata_option_bytes = bytes.fromhex(metadata_option_hex_str[2:])
-        inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
-        if inner_bytes is None:
-            return None
-        return _decode_v15_metadata(inner_bytes, runtime_config=runtime_config)
+        metadata = MetadataV15.decode_from_metadata_option(metadata_option_bytes)
+        registry = PortableRegistry.from_metadata_v15(metadata)
+        return metadata, registry
 
     async def encode_scale(
         self,
@@ -1541,21 +1481,25 @@ class AsyncSubstrateInterface(SubstrateMixin):
         """
         if scale_bytes == b"":
             return None
-        # TODO can probably remove this
         if type_string == "scale_info::0":  # Is an AccountId
             # Decode AccountId bytes to SS58 address
             return ss58_encode(scale_bytes, self.ss58_format)
         else:
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
-            if runtime.implements_scaleinfo and force_legacy is False:
-                try:
-                    obj_ = runtime.runtime_config.batch_decode(
-                        [type_string],
-                        [scale_bytes])
-                    obj = obj_[0]
-                except NotImplementedError:
-                    obj = legacy_scale_decode(type_string, scale_bytes, runtime)
+            if runtime.metadata_v15 is not None and force_legacy is False:
+                obj = await asyncio.to_thread(
+                    decode_by_type_string, type_string, runtime.registry, scale_bytes
+                )
+                if self.decode_ss58:
+                    try:
+                        type_str_int = int(type_string.split("::")[1])
+                        decoded_type_str = runtime.type_id_to_name[type_str_int]
+                        obj = convert_account_ids(
+                            obj, decoded_type_str, runtime.ss58_format
+                        )
+                    except (ValueError, KeyError):
+                        pass
             else:
                 obj = legacy_scale_decode(type_string, scale_bytes, runtime)
         if return_scale_obj:
@@ -1652,31 +1596,28 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 self.get_parent_block_hash(block_hash),
                 self.get_block_number(block_hash),
             )
-        runtime_info, metadata_v15 = await asyncio.gather(
+        runtime_info, metadata, (metadata_v15, registry) = await asyncio.gather(
             self.get_block_runtime_info(runtime_block_hash),
-            self._load_registry_at_block(
-                block_hash=runtime_block_hash, runtime_config=runtime_config
-            ),
-        )
-        if metadata_v15 is not None:
-            # V15 is a superset of V14; use it directly, skipping the V14 fetch
-            metadata = metadata_v15
-            logger.debug(
-                f"Retrieved metadata v15 for {runtime_version} from Substrate node"
-            )
-        else:
-            metadata = await self.get_block_metadata(
+            self.get_block_metadata(
                 block_hash=runtime_block_hash,
                 runtime_config=runtime_config,
                 decode=True,
-            )
-            logger.debug(
-                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. "
-                f"This indicates the block is quite old, decoding for this block will use legacy Python decoding."
-            )
+            ),
+            self._load_registry_at_block(block_hash=runtime_block_hash),
+        )
         if metadata is None:
+            # does this ever happen?
             raise SubstrateRequestException(
                 f"No metadata for block '{runtime_block_hash}'"
+            )
+        if metadata_v15 is not None:
+            logger.debug(
+                f"Retrieved metadata and metadata v15 for {runtime_version} from Substrate node"
+            )
+        else:
+            logger.debug(
+                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. This indicates the "
+                f"block is quite old, decoding for this block will use legacy Python decoding."
             )
         runtime = Runtime(
             chain=self.chain,
@@ -1685,6 +1626,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             runtime_config=runtime_config,
             metadata_v15=metadata_v15,
             runtime_info=runtime_info,
+            registry=registry,
             ss58_format=self.ss58_format,
         )
         self.runtime_cache.add_item(
@@ -2477,13 +2419,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash=block_hash,
             force_legacy_decode=True,
         )
-        # Force legacy decoding for events
+        # bt-decode Metadata V15 is not ideal for events. Force legacy decoding for this
         if storage_obj:
             for item in list(storage_obj):
                 events.append(item)
         return events
 
-    async def get_metadata(self, block_hash=None):
+    async def get_metadata(self, block_hash=None) -> MetadataV15:
         """
         Returns `MetadataVersioned` object for given block_hash or chaintip if block_hash is omitted
 
@@ -2641,6 +2583,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # SCALE type string of value
         param_types = storage_item.get_params_type_string()
         value_scale_type = storage_item.get_value_type_string()
+        # V14 and V15 metadata may have different portable type registry numbering.
+        # Use V15 type ID when available to ensure correct decoding with the V15 registry.
+        if v15_type_id := runtime.get_v15_storage_type_id(module, storage_function):
+            value_scale_type = f"scale_info::{v15_type_id}"
 
         if len(params) != len(param_types):
             raise ValueError(
@@ -3366,7 +3312,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             signature_version = keypair.crypto_type
 
             # Sign payload
-            signature = keypair.sign(signature_payload.data)
+            signature = keypair.sign(signature_payload)
             if inspect.isawaitable(signature):
                 signature = await signature
 
@@ -3455,7 +3401,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         if "encoder" in runtime_call_def:
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
-            param_data = runtime_call_def["encoder"](params, runtime)
+            param_data = runtime_call_def["encoder"](params, runtime.registry)
         else:
             for idx, param in enumerate(runtime_call_def["params"]):
                 param_type_string = f"{param['type']}"
@@ -3488,13 +3434,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         # Get correct type
-        if isinstance(result_bytes, str):
-            raw_bytes = hex_to_bytes(result_bytes)
-        else:
-            raw_bytes = bytes(result_bytes)
-        result_decoded = runtime_call_def["decoder"](raw_bytes, runtime)
-        logger.debug("Decoded old runtime call result: ", result_decoded)
-        result_obj = ScaleObj(result_decoded)
+        result_decoded = runtime_call_def["decoder"](bytes(result_bytes))
+        as_dict = _bt_decode_to_dict_or_list(result_decoded)
+        logger.debug("Decoded old runtime call result: ", as_dict)
+        result_obj = ScaleObj(as_dict)
 
         return result_obj
 
@@ -3536,9 +3479,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 )
 
             else:
-                metadata_v15_value = (
-                    runtime.metadata_v15.get_metadata().value_object[1].value
-                )
+                metadata_v15_value = runtime.metadata_v15.value()
 
                 apis = {entry["name"]: entry for entry in metadata_v15_value["apis"]}
                 api_entry = apis[api]
@@ -4046,6 +3987,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     value_type,
                     key_hashers,
                     ignore_decoding_errors,
+                    self.decode_ss58,
                 )
             else:
                 # storage item and value scale type are not included here because this is batch-decoded in rust
@@ -4092,6 +4034,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     value_type,
                     key_hashers,
                     ignore_decoding_errors,
+                    self.decode_ss58,
                 )
         return AsyncQueryMapResult(
             records=result,

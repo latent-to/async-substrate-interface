@@ -1,7 +1,11 @@
 import tracemalloc
 from unittest.mock import MagicMock
 
-from async_substrate_interface.sync_substrate import SubstrateInterface, QueryMapResult
+from async_substrate_interface.sync_substrate import (
+    SubstrateInterface,
+    QueryMapResult,
+    ExtrinsicReceipt,
+)
 from async_substrate_interface.types import ScaleObj
 
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
@@ -230,3 +234,290 @@ class TestGetBlockNumber:
         substrate.runtime_cache.add_item.assert_called_once_with(
             block_hash="0xABC", block=100
         )
+
+
+class TestExtrinsicReceiptProcessEvents:
+    def _make_event(self, module_id, event_id, attributes, extrinsic_idx=0):
+        return {
+            "extrinsic_idx": extrinsic_idx,
+            "event": {
+                "module_id": module_id,
+                "event_id": event_id,
+                "attributes": attributes,
+            }
+        }
+
+    def _make_module_error(self, name="ModuleError", docs=None):
+        module_error = MagicMock()
+        module_error.name = name
+        module_error.docs = docs if docs is not None else ["module error docs"]
+        return module_error
+
+    def _make_receipt(self, events):
+        substrate = MagicMock()
+        substrate.metadata = MagicMock()
+        substrate.get_events = MagicMock(return_value=events)
+        receipt = ExtrinsicReceipt(
+            substrate=substrate,
+            extrinsic_hash="0xdeadbeef",
+            block_hash="0xabc",
+            extrinsic_idx=0,
+        )
+        return receipt, substrate
+
+    def test_extracts_dispatch_info_weight(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicSuccess",
+                {"dispatch_info": {"weight": {"ref_time": 1, "proof_size": 2}}},
+            )
+        ]
+        receipt, _ = self._make_receipt(events)
+
+        assert receipt.is_success is True
+        assert receipt.error_message is None
+        assert receipt.weight == {"ref_time": 1, "proof_size": 2}
+
+    def test_extracts_legacy_weight(self):
+        events = [self._make_event("System", "ExtrinsicSuccess", {"weight": 7})]
+        receipt, _ = self._make_receipt(events)
+
+        assert receipt.is_success is True
+        assert receipt.error_message is None
+        assert receipt.weight == 7
+
+    def test_prefers_transaction_fee_paid_over_deposit_fallback(self):
+        events = [
+            self._make_event(
+                "TransactionPayment",
+                "TransactionFeePaid",
+                {"actual_fee": 10},
+            ),
+            self._make_event("Treasury", "Deposit", {"value": 99}),
+            self._make_event("Balances", "Deposit", {"amount": 88}),
+        ]
+        receipt, _ = self._make_receipt(events)
+
+        assert receipt.total_fee_amount == 10
+
+    def test_accumulates_fallback_fee_from_deposits(self):
+        events = [
+            self._make_event("Treasury", "Deposit", {"value": 3}),
+            self._make_event("Balances", "Deposit", {"amount": 2}),
+        ]
+        receipt, _ = self._make_receipt(events)
+
+        assert receipt.total_fee_amount == 5
+
+    def test_decodes_legacy_module_error_tuple(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"Module": (3, 4)},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+        substrate.metadata.get_module_error.return_value = self._make_module_error(
+            name="InsufficientBalance",
+            docs=["balance too low"],
+        )
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "Module",
+            "name": "InsufficientBalance",
+            "docs": ["balance too low"],
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_called_once_with(
+            module_index=3, error_index=4
+        )
+
+    def test_decodes_module_error_from_hex_error_bytes(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"Module": {"index": 5, "error": "0x0a000000"}},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+        substrate.metadata.get_module_error.return_value = self._make_module_error(
+            name="DecodedHexError",
+            docs=["decoded from first byte"],
+        )
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "Module",
+            "name": "DecodedHexError",
+            "docs": ["decoded from first byte"],
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_called_once_with(
+            module_index=5, error_index=10
+        )
+
+    def test_maps_bad_origin_error(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"BadOrigin": None},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "System",
+            "name": "BadOrigin",
+            "docs": "Bad origin",
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_maps_cannot_lookup_error(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"CannotLookup": None},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "System",
+            "name": "CannotLookup",
+            "docs": "Cannot lookup",
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_maps_token_error(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"Token": "FundsUnavailable"},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "System",
+            "name": "Token",
+            "docs": "FundsUnavailable",
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_preserves_unknown_dispatch_error_as_none(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"Arithmetic": "Overflow"},
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message is None
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_failure_takes_precedence_over_success(self):
+        events = [
+            self._make_event(
+                "System",
+                "ExtrinsicSuccess",
+                {"dispatch_info": {"weight": 1}},
+            ),
+            self._make_event(
+                "System",
+                "ExtrinsicFailed",
+                {
+                    "dispatch_info": {"weight": 9},
+                    "dispatch_error": {"Other": None},
+                },
+            ),
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "System",
+            "name": "Other",
+            "docs": "Unspecified error occurred",
+        }
+        assert receipt.weight == 9
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_maps_mevshield_decrypted_rejected_error(self):
+        events = [
+            self._make_event(
+                "MevShield",
+                "DecryptedRejected",
+                {
+                    "reason": {
+                        "post_info": {"actual_weight": 123},
+                        "error": {"Other": None},
+                    }
+                },
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "System",
+            "name": "Other",
+            "docs": "Unspecified error occurred",
+        }
+        assert receipt.weight == 123
+        assert receipt.total_fee_amount == 0
+        substrate.metadata.get_module_error.assert_not_called()
+
+    def test_maps_mevshield_decryption_failed_error(self):
+        events = [
+            self._make_event(
+                "MevShield",
+                "DecryptionFailed",
+                {"reason": "ciphertext could not be decrypted"},
+            )
+        ]
+        receipt, substrate = self._make_receipt(events)
+
+        assert receipt.is_success is False
+        assert receipt.error_message == {
+            "type": "MevShield",
+            "name": "DecryptionFailed",
+            "docs": "ciphertext could not be decrypted",
+        }
+        assert receipt.total_fee_amount == 0
+        assert receipt.weight is None
+        substrate.metadata.get_module_error.assert_not_called()
