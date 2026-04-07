@@ -254,4 +254,5 @@ jobs:
           uv pip install --system '.[dev]'
 
       - name: Run BTCLI unit tests
-        run: pytest ${{ github.workspace }}/btcli/tests/unit_tests
+        working-directory: ${{ github.workspace }}/btcli
+        run: pytest tests/unit_tests
