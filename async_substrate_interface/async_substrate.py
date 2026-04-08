@@ -865,11 +865,11 @@ class Websocket:
                     logger.debug(f"Timed out waiting for cancellation")
                     pass
             logger.debug("Attempting connection")
+            loop = asyncio.get_running_loop()
             try:
                 family, type_, proto, _, sockaddr = await self._resolve_host()
                 tcp_sock = socket.socket(family, type_, proto)
                 tcp_sock.setblocking(False)
-                loop = asyncio.get_running_loop()
                 try:
                     await asyncio.wait_for(
                         loop.sock_connect(tcp_sock, sockaddr), timeout=10.0
@@ -900,9 +900,7 @@ class Websocket:
                 except Exception as e:
                     logger.debug(f"Could not save TLS session: {e}")
             if self._send_recv_task is None or self._send_recv_task.done():
-                self._send_recv_task = asyncio.get_running_loop().create_task(
-                    self._handler(self.ws)
-                )
+                self._send_recv_task = loop.create_task(self._handler(self.ws))
         return None
 
     async def _handler(self, ws: ClientConnection) -> Union[None, Exception]:
