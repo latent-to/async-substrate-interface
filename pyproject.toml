@@ -9,7 +9,7 @@ keywords = ["substrate", "development", "bittensor"]
 dependencies = [
   "wheel",
   "aiosqlite>=0.21.0,<1.0.0",
-  "cyscale==0.1.5",
+  "cyscale==0.1.6",
   "websockets>=14.1",
   "xxhash",
   "ruff==0.11.5",
