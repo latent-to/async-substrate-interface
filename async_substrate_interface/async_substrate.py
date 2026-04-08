@@ -25,18 +25,18 @@ from typing import (
 )
 
 import scalecodec
-import websockets.exceptions
-from scalecodec import GenericVariant
-from scalecodec.base import ScaleBytes, ScaleType, RuntimeConfigurationObject
+from scalecodec import ScaleBytes
+from scalecodec.base import ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
 from scalecodec.types import (
     GenericCall,
     GenericExtrinsic,
-    ss58_encode,
     MultiAccountId,
 )
+from scalecodec.utils.ss58 import ss58_encode
 from websockets import CloseCode
 from websockets.asyncio.client import connect, ClientConnection
+import websockets.exceptions
 from websockets.exceptions import (
     ConnectionClosed,
     InvalidURI,
@@ -4268,7 +4268,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         module_name: str,
         call_function_name: str,
         block_hash: Optional[str] = None,
-    ) -> Optional[GenericVariant]:
+    ) -> Optional[scalecodec.GenericVariant]:
         """
         Retrieves specified call from the metadata at the block specified, or the chain tip if omitted.
 

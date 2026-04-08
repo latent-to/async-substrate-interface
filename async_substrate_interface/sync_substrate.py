@@ -7,21 +7,21 @@ from typing import Optional, Union, Callable, Any
 from unittest.mock import MagicMock
 
 import scalecodec
+from scalecodec import ScaleBytes
+from scalecodec.base import ScaleType
+from scalecodec.types import (
+    GenericCall,
+    GenericExtrinsic,
+    MultiAccountId,
+)
+from scalecodec.utils.ss58 import ss58_encode
+from websockets.sync.client import connect, ClientConnection
+from websockets.exceptions import ConnectionClosed
+
 from async_substrate_interface.types import (
     _decode_option_opaque_metadata,
     _decode_v15_metadata,
 )
-from scalecodec import (
-    GenericCall,
-    GenericExtrinsic,
-    GenericRuntimeCallDefinition,
-    ss58_encode,
-    MultiAccountId,
-    GenericVariant,
-)
-from scalecodec.base import ScaleBytes, ScaleType
-from websockets.sync.client import connect, ClientConnection
-from websockets.exceptions import ConnectionClosed
 
 from async_substrate_interface.errors import (
     ExtrinsicNotFound,
@@ -3233,7 +3233,7 @@ class SubstrateInterface(SubstrateMixin):
         module_name: str,
         call_function_name: str,
         block_hash: Optional[str] = None,
-    ) -> Optional[GenericVariant]:
+    ) -> Optional[scalecodec.GenericVariant]:
         """
         Retrieves specified call from the metadata at the block specified, or the chain tip if omitted.
 
