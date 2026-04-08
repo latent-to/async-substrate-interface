@@ -2363,7 +2363,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash=block_hash,
             force_legacy_decode=False,
         )
-        return events
+        return events.value
 
     async def get_metadata(self, block_hash=None):
         """
