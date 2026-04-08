@@ -2795,7 +2795,7 @@ class SubstrateInterface(SubstrateMixin):
         subscription_handler=None,
         reuse_block_hash: bool = False,
         force_legacy_decode: bool = False,
-    ) -> Optional[Union["ScaleObj", Any]]:
+    ) -> Optional[ScaleObj[Any]]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
         you should use ``self.query_multiple``
@@ -2823,9 +2823,10 @@ class SubstrateInterface(SubstrateMixin):
             force_legacy_decode=force_legacy_decode,
         )
         result = responses[preprocessed.queryable][0]
-        if isinstance(result, (list, tuple, int, float)):
+        if result is not None:
             return ScaleObj(result)
-        return result
+        else:
+            return result
 
     def query_map(
         self,
