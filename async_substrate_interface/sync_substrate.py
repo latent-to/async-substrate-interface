@@ -277,7 +277,9 @@ class ExtrinsicReceipt:
                 # events and have ensured nothing has set an error message
                 self.__is_success = True
 
-    def _resolve_module_error_message(self, module_index: int, error_index: int) -> dict:
+    def _resolve_module_error_message(
+        self, module_index: int, error_index: int
+    ) -> dict:
         module_error = self.substrate.metadata.get_module_error(
             module_index=module_index, error_index=error_index
         )
@@ -1509,7 +1511,7 @@ class SubstrateInterface(SubstrateMixin):
         if block:
             return block["extrinsics"]
 
-    def get_events(self, block_hash: Optional[str] = None) -> list:
+    def get_events(self, block_hash: Optional[str] = None) -> list[dict]:
         """
         Convenience method to get events for a certain block (storage call for module 'System' and function 'Events')
 
@@ -1519,63 +1521,15 @@ class SubstrateInterface(SubstrateMixin):
         Returns:
             list of events
         """
-
-        def convert_event_data(data):
-            # Extract phase information
-            phase_key, phase_value = next(iter(data["phase"].items()))
-            try:
-                extrinsic_idx = phase_value[0]
-            except IndexError:
-                extrinsic_idx = None
-
-            # Extract event details
-            module_id, event_data = next(iter(data["event"].items()))
-            event_id, attributes_data = next(iter(event_data[0].items()))
-
-            # Convert class and pays_fee dictionaries to their string equivalents if they exist
-            attributes = attributes_data
-            if isinstance(attributes, dict):
-                for key, value in attributes.items():
-                    if key == "who":
-                        who = ss58_encode(bytes(value[0]), self.ss58_format)
-                        attributes["who"] = who
-                    if isinstance(value, dict):
-                        # Convert nested single-key dictionaries to their keys as strings
-                        for sub_key, sub_value in value.items():
-                            if isinstance(sub_value, dict):
-                                for sub_sub_key, sub_sub_value in sub_value.items():
-                                    if sub_sub_value == ():
-                                        attributes[key][sub_key] = sub_sub_key
-
-            # Create the converted dictionary
-            converted = {
-                "phase": phase_key,
-                "extrinsic_idx": extrinsic_idx,
-                "event": {
-                    "module_id": module_id,
-                    "event_id": event_id,
-                    "attributes": attributes,
-                },
-                "topics": list(data["topics"]),  # Convert topics tuple to a list
-            }
-
-            return converted
-
-        events = []
-
         if not block_hash:
             block_hash = self.get_chain_head()
 
-        storage_obj = self.query(
+        events = self.query(
             module="System",
             storage_function="Events",
             block_hash=block_hash,
-            force_legacy_decode=True,
+            force_legacy_decode=False,
         )
-        # bt-decode Metadata V15 is not ideal for events. Force legacy decoding for this
-        if storage_obj:
-            for item in list(storage_obj):
-                events.append(item)
         return events
 
     def get_metadata(self, block_hash=None):

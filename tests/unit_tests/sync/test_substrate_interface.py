@@ -244,7 +244,7 @@ class TestExtrinsicReceiptProcessEvents:
                 "module_id": module_id,
                 "event_id": event_id,
                 "attributes": attributes,
-            }
+            },
         }
 
     def _make_module_error(self, name="ModuleError", docs=None):
