@@ -1416,6 +1416,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
         metadata_option_hex_str = metadata_rpc_result["result"]
         metadata_option_bytes = bytes.fromhex(metadata_option_hex_str[2:])
         inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
+        with open(f"/tmp/{block_hash}.bin", "wb+") as f:
+            f.write(inner_bytes)
         if inner_bytes is None:
             return None
         return _decode_v15_metadata(inner_bytes, runtime_config=runtime_config)

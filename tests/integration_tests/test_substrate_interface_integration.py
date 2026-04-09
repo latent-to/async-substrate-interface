@@ -732,4 +732,4 @@ def test_bits(substrate):
         storage_function="AlphaSqrtPrice",
         params=[71],
     )
-    assert isinstance(current_sqrt_price, dict)
+    assert isinstance(current_sqrt_price.value, dict)
