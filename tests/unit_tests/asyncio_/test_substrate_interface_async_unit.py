@@ -13,7 +13,6 @@ from async_substrate_interface.async_substrate import (
     get_async_substrate_interface,
 )
 from async_substrate_interface.errors import SubstrateRequestException
-from async_substrate_interface.types import ScaleObj
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 
 
@@ -37,33 +36,13 @@ async def test_runtime_call(monkeypatch):
     substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
 
     fake_runtime = MagicMock()
-    fake_metadata_v15 = MagicMock()
-    fake_metadata_v15.get_metadata.return_value.value_object[1].value = {
-        "apis": [
-            {
-                "name": "SubstrateApi",
-                "methods": [
-                    {
-                        "name": "SubstrateMethod",
-                        "inputs": [],
-                        "output": "1",
-                    },
-                ],
-            },
-        ],
-        "types": {
-            "types": [
-                {
-                    "id": "1",
-                    "type": {
-                        "path": ["Vec"],
-                        "def": {"sequence": {"type": "4"}},
-                    },
-                },
-            ]
-        },
+    fake_runtime.metadata_v15 = MagicMock()  # non-None so the V15 path is taken
+    fake_runtime.runtime_api_map = {
+        "SubstrateApi": {
+            "SubstrateMethod": {"inputs": [], "output": "1"},
+        }
     }
-    fake_runtime.metadata_v15 = fake_metadata_v15
+    fake_runtime.type_id_to_name = {}  # "1" not in map → not Vec<u8> → new path
     substrate.init_runtime = AsyncMock(return_value=fake_runtime)
 
     # Patch encode_scale (should not be called in this test since no inputs)
@@ -88,9 +67,7 @@ async def test_runtime_call(monkeypatch):
         "SubstrateMethod",
     )
 
-    # Validate the result is wrapped in ScaleObj
-    assert isinstance(result, ScaleObj)
-    assert result.value == "decoded_result"
+    assert result == "decoded_result"
 
     # Check decode_scale called correctly
     substrate.decode_scale.assert_called_once_with(

@@ -44,7 +44,7 @@ def test_legacy_decoding(substrate):
     )
     for key, value in query_map_result:
         assert isinstance(key, int)
-        assert isinstance(value, ScaleObj)
+        assert isinstance(value, bool)
 
     timestamp = substrate.query(
         "Timestamp",
@@ -65,10 +65,9 @@ def test_ss58_conversion(substrate):
     )
     for key, value in qm.records:
         assert isinstance(key, str)
-        assert isinstance(value, ScaleObj)
-        assert isinstance(value.value, list)
-        if len(value.value) > 0:
-            for decoded_key in value.value:
+        assert isinstance(value, list)
+        if len(value) > 0:
+            for decoded_key in value:
                 assert isinstance(decoded_key, str)
     print("test_ss58_conversion succeeded")
 
