@@ -200,7 +200,7 @@ def test_old_runtime_calls_natively(substrate):
         params=[coldkey_ss58],
         block_hash=old_block_hash,
     )
-    assert result.value == [
+    assert result == [
         {
             "netuid": 0,
             "hotkey": "5HKrFigd2VndU3Kcj6ZvoxZ8MtdX7d9vd6YzHLysPpsib9pQ",
