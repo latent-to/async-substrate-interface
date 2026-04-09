@@ -61,7 +61,6 @@ build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 dev = [
-    "bittensor",
     "pytest==8.3.5",
     "pytest-asyncio==0.26.0",
     "pytest-mock==3.14.0",
