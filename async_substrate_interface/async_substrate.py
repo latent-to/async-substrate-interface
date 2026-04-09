@@ -50,7 +50,6 @@ from async_substrate_interface.errors import (
 )
 from async_substrate_interface.protocols import Keypair
 from async_substrate_interface.types import (
-    ScaleObj,
     RequestManager,
     Runtime,
     RuntimeCache,
@@ -3537,7 +3536,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         block_hash: Optional[str] = None,
         reuse_block_hash: bool = False,
         runtime: Optional[Runtime] = None,
-    ) -> Optional[ScaleObj]:
+    ) -> Optional[ScaleType[Any]]:
         """
         Returns the decoded `ScaleType` object of the constant for given module name, call function name and block_hash
         (or chaintip if block_hash is omitted)

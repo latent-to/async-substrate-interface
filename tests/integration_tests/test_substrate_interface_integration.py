@@ -3,8 +3,7 @@ import pytest
 from scalecodec import ss58_encode
 
 from async_substrate_interface.sync_substrate import SubstrateInterface
-from async_substrate_interface.types import ScaleObj
-from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
+from tests.helpers.settings import ARCHIVE_ENTRYPOINT
 
 
 @pytest.fixture

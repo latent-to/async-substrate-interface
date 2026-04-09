@@ -36,7 +36,6 @@ from async_substrate_interface.types import (
     Runtime,
     RequestManager,
     Preprocessed,
-    ScaleObj,
     RequestResults,
 )
 from async_substrate_interface.utils import (
@@ -676,7 +675,7 @@ class SubstrateInterface(SubstrateMixin):
         self,
         type_string: str,
         scale_bytes: bytes,
-    ) -> Union[ScaleObj, Any]:
+    ) -> Optional[ScaleType]:
         """
         Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given RUST type_string
         (e.g. BlockNumber). The relevant versioning information of the type (if defined) will be applied if block_hash
@@ -2401,7 +2400,7 @@ class SubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[Union[list, dict]] = None,
         block_hash: Optional[str] = None,
-    ) -> ScaleObj:
+    ) -> ScaleType[Any]:
         logger.debug(
             f"Decoding old runtime call: {api}.{method} with params: {params} at block hash: {block_hash}"
         )
@@ -2433,10 +2432,7 @@ class SubstrateInterface(SubstrateMixin):
         else:
             raw_bytes = bytes(result_bytes)
         result_decoded = runtime_call_def["decoder"](raw_bytes, runtime)
-        logger.debug("Decoded old runtime call result: ", result_decoded)
-        result_obj = ScaleObj(result_decoded)
-
-        return result_obj
+        return result_decoded
 
     def runtime_call(
         self,
@@ -2444,7 +2440,7 @@ class SubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[Union[list, dict]] = None,
         block_hash: Optional[str] = None,
-    ) -> ScaleObj:
+    ) -> ScaleType[Any]:
         """
         Calls a runtime API method
 
@@ -2589,7 +2585,7 @@ class SubstrateInterface(SubstrateMixin):
         constant_name: str,
         block_hash: Optional[str] = None,
         reuse_block_hash: bool = False,
-    ) -> Optional[ScaleObj]:
+    ) -> Optional[ScaleType]:
         """
         Returns the decoded `ScaleType` object of the constant for given module name, call function name and block_hash
         (or chaintip if block_hash is omitted)

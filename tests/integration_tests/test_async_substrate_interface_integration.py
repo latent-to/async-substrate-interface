@@ -12,7 +12,6 @@ import pytest_asyncio
 from scalecodec import ss58_encode
 
 from async_substrate_interface.async_substrate import AsyncSubstrateInterface, logger
-from async_substrate_interface.types import ScaleObj
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 from tests.helpers.proxy_server import ProxyServer
 
