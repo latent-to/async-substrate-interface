@@ -251,6 +251,7 @@ class Runtime:
     type_registry_preset = None
     registry_type_map: dict[str, int]
     type_id_to_name: dict[int, str]
+    runtime_api_map: dict[str, dict[str, Any]]
 
     def __init__(
         self,
@@ -559,6 +560,13 @@ class Runtime:
 
         self.registry_type_map = registry_type_map
         self.type_id_to_name = type_id_to_name
+
+        if self.metadata_v15 is not None:
+            v15 = self.metadata_v15.get_metadata().value_object[1].value
+            self.runtime_api_map = {
+                api_entry["name"]: {m["name"]: m for m in api_entry["methods"]}
+                for api_entry in v15["apis"]
+            }
 
 
 RequestResults = dict[Union[str, int], list[Union[ScaleType, dict]]]

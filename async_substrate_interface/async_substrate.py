@@ -3392,15 +3392,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 )
 
             else:
-                metadata_v15_value = (
-                    runtime.metadata_v15.get_metadata().value_object[1].value
-                )
-
-                apis = {entry["name"]: entry for entry in metadata_v15_value["apis"]}
-                api_entry = apis[api]
-                methods = {entry["name"]: entry for entry in api_entry["methods"]}
-                runtime_call_def = methods[method]
-                if _determine_if_old_runtime_call(runtime_call_def, metadata_v15_value):
+                runtime_call_def = runtime.runtime_api_map[api][method]
+                if _determine_if_old_runtime_call(runtime_call_def, runtime):
                     return await self._do_runtime_call_old(
                         api, method, params, block_hash, runtime=runtime
                     )

@@ -9,33 +9,9 @@ if TYPE_CHECKING:
     from async_substrate_interface.types import Runtime
 
 
-def _determine_if_old_runtime_call(runtime_call_def, metadata_v15_value) -> bool:
-    # TODO should be able to remove this
-    # Check if the output type is a Vec<u8>
-    # If so, call the API using the old method
-    output_type_def = [
-        x
-        for x in metadata_v15_value["types"]["types"]
-        if x["id"] == runtime_call_def["output"]
-    ]
-    if output_type_def:
-        output_type_def = output_type_def[0]
-
-        if "sequence" in output_type_def["type"]["def"]:
-            output_type_seq_def_id = output_type_def["type"]["def"]["sequence"]["type"]
-            output_type_seq_def = [
-                x
-                for x in metadata_v15_value["types"]["types"]
-                if x["id"] == output_type_seq_def_id
-            ]
-            if output_type_seq_def:
-                output_type_seq_def = output_type_seq_def[0]
-                if (
-                    "primitive" in output_type_seq_def["type"]["def"]
-                    and output_type_seq_def["type"]["def"]["primitive"] == "u8"
-                ):
-                    return True
-    return False
+def _determine_if_old_runtime_call(runtime_call_def, runtime) -> bool:
+    # Runtime calls whose output is Vec<u8> must use the old decode path
+    return runtime.type_id_to_name.get(runtime_call_def["output"]) == "Vec<u8>"
 
 
 def _decode_scale_list_with_runtime(
