@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import TYPE_CHECKING, Union, Any
+from typing import TYPE_CHECKING, Any
 
 from scalecodec import ss58_decode
 from scalecodec.base import ScaleBytes, RuntimeConfigurationObject
@@ -56,7 +56,7 @@ def _cyscale_decode(type_name: str, raw_bytes: bytes, runtime: "Runtime") -> Any
 
 def stake_info_decode_vec_legacy_compatibility(
     raw_bytes: bytes, runtime: "Runtime"
-) -> list[dict[str, Union[str, int, bytes, bool]]]:
+) -> list[dict[str, str | int | bytes | bool]]:
     ss58_format = runtime.ss58_format
     NewStakeInfo = namedtuple(
         "NewStakeInfo",

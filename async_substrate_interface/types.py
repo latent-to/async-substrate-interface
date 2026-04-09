@@ -11,7 +11,7 @@ from typing import Optional, Union, Any, Sequence, Generic, TypeVar
 
 import scalecodec.types
 from scalecodec import ss58_encode, ss58_decode, is_valid_ss58_address
-from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
+from scalecodec.base import RuntimeConfigurationObject, ScaleBytes, ScaleType
 from scalecodec.type_registry import load_type_registry_preset
 from scalecodec.types import GenericCall, ScaleType, MultiAccountId
 
@@ -569,7 +569,7 @@ class Runtime:
             }
 
 
-RequestResults = dict[Union[str, int], list[Union[ScaleType, dict]]]
+RequestResults = dict[str | int, list[ScaleType] | list[dict]]
 
 
 class RequestManager:
@@ -708,9 +708,7 @@ class SubstrateMixin(ABC):
         """
         return self._chain
 
-    def ss58_encode(
-        self, public_key: Union[str, bytes], ss58_format: int = None
-    ) -> str:
+    def ss58_encode(self, public_key: str | bytes, ss58_format: int = None) -> str:
         """
         Helper function to encode a public key to SS58 address.
 
@@ -1051,7 +1049,7 @@ class SubstrateMixin(ABC):
     @staticmethod
     def _encode_scale_legacy(
         call_definition: list[dict],
-        params: Union[list[Any], dict[str, Any]],
+        params: list[Any] | dict[str, Any],
         runtime: Runtime,
     ) -> bytes:
         """Returns a hex encoded string of the params using their types."""
@@ -1110,7 +1108,7 @@ class SubstrateMixin(ABC):
     @staticmethod
     def _get_metadata_call_functions(
         runtime: Runtime,
-    ) -> dict[str, dict[str, dict[str, dict[str, Union[str, int, list]]]]]:
+    ) -> dict[str, dict[str, dict[str, dict[str, str | int | list]]]]:
         """
         See subclass `get_metadata_call_functions` for documentation.
         """

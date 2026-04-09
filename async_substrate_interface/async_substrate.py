@@ -18,7 +18,6 @@ from hashlib import blake2b
 from typing import (
     Optional,
     Any,
-    Union,
     Callable,
     Awaitable,
     cast,
@@ -366,7 +365,7 @@ class AsyncExtrinsicReceipt:
         return self.__error_message
 
     @property
-    async def weight(self) -> Union[int, dict]:
+    async def weight(self) -> int | dict:
         """
         Contains the actual weight when executing this extrinsic
 
@@ -837,7 +836,7 @@ class Websocket:
                 self._send_recv_task = loop.create_task(self._handler(self.ws))
         return None
 
-    async def _handler(self, ws: ClientConnection) -> Union[None, Exception]:
+    async def _handler(self, ws: ClientConnection) -> Optional[Exception]:
         logger.debug("WS handler attached")
         recv_task = asyncio.create_task(self._start_receiving(ws))
         send_task = asyncio.create_task(self._start_sending(ws))
@@ -1578,9 +1577,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             )
         else:
             metadata = await self.get_block_metadata(
-                block_hash=runtime_block_hash,
-                runtime_config=runtime_config,
-                decode=True,
+                block_hash=runtime_block_hash, runtime_config=runtime_config
             )
             logger.debug(
                 f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. "
@@ -2436,8 +2433,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self,
         block_hash: Optional[str] = None,
         runtime_config: Optional[RuntimeConfigurationObject] = None,
-        decode: bool = True,
-    ) -> Optional[Union[dict, ScaleType]]:
+    ) -> Optional[scalecodec.types.GenericMetadataVersioned]:
         """
         A pass-though to existing JSONRPC method `state_getMetadata`.
 
@@ -2450,7 +2446,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             from the server
         """
         params = None
-        if decode and not runtime_config:
+        if not runtime_config:
             raise ValueError(
                 "Cannot decode runtime configuration without a supplied runtime_config"
             )
@@ -2459,14 +2455,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
             params = [block_hash]
         response = await self.rpc_request("state_getMetadata", params)
 
-        if (result := response.get("result")) and decode:
+        if result := response.get("result"):
             metadata_decoder = runtime_config.create_scale_object(
                 "MetadataVersioned", data=ScaleBytes(result)
             )
             metadata_decoder.decode()
             return metadata_decoder
-        else:
-            return result
+        return None
 
     async def _preprocess(
         self,
@@ -2539,7 +2534,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
     async def _process_response(
         self,
         response: dict,
-        subscription_id: Union[int, str],
+        subscription_id: int | str,
         value_scale_type: Optional[str] = None,
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
@@ -2562,7 +2557,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Returns:
              (decoded response, completion)
         """
-        result: Union[dict, ScaleType] = response
+        result: dict | ScaleType = response
         if value_scale_type and isinstance(storage_item, ScaleType):
             if (response_result := response.get("result")) is not None:
                 query_value = response_result
@@ -3144,12 +3139,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self,
         call: GenericCall,
         keypair: Keypair,
-        era: Optional[Union[dict, str]] = None,
+        era: Optional[dict | str] = None,
         nonce: Optional[int] = None,
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
-        signature: Optional[Union[bytes, str]] = None,
-    ) -> "GenericExtrinsic":
+        signature: Optional[bytes | str] = None,
+    ) -> scalecodec.types.GenericExtrinsic:
         """
         Creates an extrinsic signed by given account details
 
@@ -3293,7 +3288,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self,
         api: str,
         method: str,
-        params: Optional[Union[list, dict]] = None,
+        params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
     ) -> Any:
@@ -3352,7 +3347,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self,
         api: str,
         method: str,
-        params: Optional[Union[list, dict]] = None,
+        params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
     ) -> Any:
         """
@@ -3569,7 +3564,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self,
         call: GenericCall,
         keypair: Keypair,
-        era: Optional[Union[dict, str]] = None,
+        era: Optional[dict | str] = None,
         nonce: Optional[int] = None,
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
@@ -3947,12 +3942,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
         call: GenericCall,
         keypair: Keypair,
         multisig_account: MultiAccountId,
-        max_weight: Optional[Union[dict, int]] = None,
+        max_weight: Optional[dict | int] = None,
         era: Optional[dict] = None,
         nonce: Optional[int] = None,
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
-        signature: Optional[Union[bytes, str]] = None,
+        signature: Optional[bytes | str] = None,
     ) -> GenericExtrinsic:
         """
         Create a Multisig extrinsic that will be signed by one of the signatories. Checks on-chain if the threshold
@@ -4184,7 +4179,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
     async def get_metadata_call_functions(
         self, block_hash: Optional[str] = None, runtime: Optional[Runtime] = None
-    ) -> dict[str, dict[str, dict[str, dict[str, Union[str, int, list]]]]]:
+    ) -> dict[str, dict[str, dict[str, dict[str, str | int | list]]]]:
         """
         Retrieves calls functions for the metadata at the specified block_hash or runtime. If neither are specified,
         the metadata at chaintip is used.
@@ -4314,7 +4309,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         block: int,
         result_handler: Callable[[dict], Awaitable[Any]],
         task_return: bool = True,
-    ) -> Union[asyncio.Task, Union[bool, Any]]:
+    ) -> asyncio.Task | bool | Any:
         """
         Executes the result_handler when the chain has reached the block specified.
 
