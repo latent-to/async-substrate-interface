@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from scalecodec import ScaleBytes
 from scalecodec.base import ScaleType
@@ -7,11 +7,45 @@ from async_substrate_interface.utils import hex_to_bytes
 
 if TYPE_CHECKING:
     from async_substrate_interface.types import Runtime
+    from async_substrate_interface.utils.storage import StorageKey
 
 
 def _determine_if_old_runtime_call(runtime_call_def, runtime) -> bool:
     # Runtime calls whose output is Vec<u8> must use the old decode path
     return runtime.type_id_to_name.get(runtime_call_def["output"]) == "Vec<u8>"
+
+
+def try_batch_decode(
+    items: list[tuple["StorageKey", Optional[ScaleBytes]]],
+    runtime: "Runtime",
+) -> list:
+    """
+    Decode a list of (StorageKey, data) pairs, using cyscale's batch_decode when
+    available and falling back to StorageKey.decode_scale_value otherwise.
+
+    Mirrors the None-data logic in StorageKey.decode_scale_value:
+      - data present      → decode as value_scale_type
+      - None + Default    → decode default bytes as value_scale_type
+      - None + Optional   → decode default bytes (0x00) as Option<value_scale_type>
+    """
+    if not runtime.implements_scaleinfo:
+        return [sk.decode_scale_value(data).value for sk, data in items]
+
+    type_strings = []
+    raw_bytes_list = []
+    for storage_key, data in items:
+        msf = storage_key.metadata_storage_function
+        if data is not None:
+            type_strings.append(storage_key.value_scale_type)
+            raw_bytes_list.append(bytes(data.data))
+        elif msf.value["modifier"] == "Default":
+            type_strings.append(storage_key.value_scale_type)
+            raw_bytes_list.append(bytes(msf.value_object["default"].value_object))
+        else:
+            type_strings.append(f"Option<{storage_key.value_scale_type}>")
+            raw_bytes_list.append(bytes(msf.value_object["default"].value_object))
+
+    return runtime.runtime_config.batch_decode(type_strings, raw_bytes_list)
 
 
 def _decode_scale_list_with_runtime(

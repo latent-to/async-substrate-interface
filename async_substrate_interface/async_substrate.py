@@ -73,6 +73,7 @@ from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
     scale_decode,
     decode_query_map,
+    try_batch_decode,
 )
 from async_substrate_interface.utils.receipt import (
     build_system_error_message,
@@ -2901,7 +2902,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_keys: list[StorageKey],
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> list:
+    ) -> list[tuple[StorageKey, Any]]:
         """
         Query multiple storage keys in one request.
 
@@ -2939,24 +2940,21 @@ class AsyncSubstrateInterface(SubstrateMixin):
             runtime=runtime,
         )
 
-        result = []
-
         storage_key_map = {s.to_hex(): s for s in storage_keys}
 
+        pairs = []
         for result_group in response["result"]:
             for change_storage_key, change_data in result_group["changes"]:
-                # Decode result for specified storage_key
                 storage_key = storage_key_map[change_storage_key]
-                if change_data is not None:
-                    change_data = ScaleBytes(change_data)
-                result.append(
+                pairs.append(
                     (
                         storage_key,
-                        storage_key.decode_scale_value(change_data).value,
-                    ),
+                        ScaleBytes(change_data) if change_data is not None else None,
+                    )
                 )
 
-        return result
+        decoded = try_batch_decode(pairs, runtime)
+        return list(zip([sk for sk, _ in pairs], decoded))
 
     async def create_scale_object(
         self,
@@ -3299,7 +3297,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         params: Optional[Union[list, dict]] = None,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> ScaleObj:
+    ) -> Any:
         logger.debug(
             f"Decoding old runtime call: {api}.{method} with params: {params} at block hash: {block_hash}"
         )
@@ -3348,11 +3346,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             raw_bytes = hex_to_bytes(result_bytes)
         else:
             raw_bytes = bytes(result_bytes)
-        result_decoded = runtime_call_def["decoder"](raw_bytes, runtime)
-        logger.debug("Decoded old runtime call result: ", result_decoded)
-        result_obj = ScaleObj(result_decoded)
-
-        return result_obj
+        result = runtime_call_def["decoder"](raw_bytes, runtime)
+        return result
 
     async def runtime_call(
         self,
@@ -3360,7 +3355,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[Union[list, dict]] = None,
         block_hash: Optional[str] = None,
-    ) -> ScaleObj:
+    ) -> Any:
         """
         Calls a runtime API method
 
@@ -3371,7 +3366,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash: Hash of the block at which to make the runtime API call
 
         Returns:
-             ScaleType from the runtime call
+             Decoded runtime call
         """
         runtime = await self.init_runtime(block_hash=block_hash)
 
@@ -3434,11 +3429,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        result_obj = ScaleObj(
-            await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
+        return await self.decode_scale(
+            output_type_string, result_bytes, runtime=runtime
         )
-
-        return result_obj
 
     async def get_account_nonce(self, account_address: str) -> int:
         """

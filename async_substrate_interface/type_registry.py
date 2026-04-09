@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, Any
 
 from scalecodec import ss58_decode
 from scalecodec.base import ScaleBytes, RuntimeConfigurationObject
@@ -37,14 +37,14 @@ def _get_legacy_rc(ss58_format: int | None = None) -> RuntimeConfigurationObject
     return _legacy_rc
 
 
-def _legacy_decode(type_string: str, raw_bytes: bytes, ss58_format: int):
+def _legacy_decode(type_string: str, raw_bytes: bytes, ss58_format: int) -> Any:
     """Decode raw_bytes using the legacy scalecodec type registry."""
     rc = _get_legacy_rc(ss58_format=ss58_format)
     obj = rc.create_scale_object(type_string, data=ScaleBytes(raw_bytes))
     return obj.decode()
 
 
-def _cyscale_decode(type_name: str, raw_bytes: bytes, runtime: "Runtime"):
+def _cyscale_decode(type_name: str, raw_bytes: bytes, runtime: "Runtime") -> Any:
     """Decode raw_bytes as type_name using cyscale's portable registry."""
     type_id = runtime.registry_type_map.get(type_name)
     if type_id is None:

@@ -49,6 +49,7 @@ from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
     decode_query_map,
     scale_decode,
+    try_batch_decode,
 )
 from async_substrate_interface.utils.receipt import (
     build_system_error_message,
@@ -2028,7 +2029,7 @@ class SubstrateInterface(SubstrateMixin):
 
     def query_multi(
         self, storage_keys: list[StorageKey], block_hash: Optional[str] = None
-    ) -> list:
+    ) -> list[tuple[StorageKey, Any]]:
         """
         Query multiple storage keys in one request.
 
@@ -2054,31 +2055,28 @@ class SubstrateInterface(SubstrateMixin):
         Returns:
             list of `(storage_key, scale_obj)` tuples
         """
-        self.init_runtime(block_hash=block_hash)
+        runtime = self.init_runtime(block_hash=block_hash)
 
         # Retrieve corresponding value
         response = self.rpc_request(
             "state_queryStorageAt", [[s.to_hex() for s in storage_keys], block_hash]
         )
 
-        result = []
-
         storage_key_map = {s.to_hex(): s for s in storage_keys}
 
+        pairs = []
         for result_group in response["result"]:
             for change_storage_key, change_data in result_group["changes"]:
-                # Decode result for specified storage_key
                 storage_key = storage_key_map[change_storage_key]
-                if change_data is not None:
-                    change_data = ScaleBytes(change_data)
-                result.append(
+                pairs.append(
                     (
                         storage_key,
-                        storage_key.decode_scale_value(change_data).value,
-                    ),
+                        ScaleBytes(change_data) if change_data is not None else None,
+                    )
                 )
 
-        return result
+        decoded = try_batch_decode(pairs, runtime)
+        return list(zip([sk for sk, _ in pairs], decoded))
 
     def create_scale_object(
         self,
