@@ -14,7 +14,6 @@ from scalecodec.types import (
     GenericExtrinsic,
     MultiAccountId,
 )
-from scalecodec.utils.ss58 import ss58_encode
 from websockets.sync.client import connect, ClientConnection
 from websockets.exceptions import ConnectionClosed
 
@@ -49,7 +48,7 @@ from async_substrate_interface.utils import (
 from async_substrate_interface.utils.decoding import (
     _determine_if_old_runtime_call,
     decode_query_map,
-    legacy_scale_decode,
+    scale_decode,
 )
 from async_substrate_interface.utils.receipt import (
     build_system_error_message,
@@ -676,8 +675,6 @@ class SubstrateInterface(SubstrateMixin):
         self,
         type_string: str,
         scale_bytes: bytes,
-        return_scale_obj=False,
-        force_legacy: bool = False,
     ) -> Union[ScaleObj, Any]:
         """
         Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given RUST type_string
@@ -687,28 +684,14 @@ class SubstrateInterface(SubstrateMixin):
         Args:
             type_string: the type string of the SCALE object for decoding
             scale_bytes: the bytes representation of the SCALE object to decode
-            return_scale_obj: Whether to return the decoded value wrapped in a SCALE-object-like wrapper, or raw.
-            force_legacy: Whether to force the use of the legacy Metadata V14 decoder
 
         Returns:
-            Decoded object
+            ScaleType object
         """
-        if type_string == "scale_info::0":  # Is an AccountId
-            # Decode AccountId bytes to SS58 address
-            return ss58_encode(scale_bytes, self.ss58_format)
+        if scale_bytes == b"":
+            return None
         else:
-            if self.runtime.implements_scaleinfo and force_legacy is False:
-                try:
-                    obj = self.runtime.runtime_config.batch_decode(
-                        [type_string], [scale_bytes]
-                    )[0]
-                except NotImplementedError:
-                    obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
-            else:
-                obj = legacy_scale_decode(type_string, scale_bytes, self.runtime)
-        if return_scale_obj:
-            return ScaleObj(obj)
-        else:
+            obj = scale_decode(type_string, scale_bytes, runtime=self.runtime)
             return obj
 
     def load_runtime(self, runtime):
@@ -1328,7 +1311,7 @@ class SubstrateInterface(SubstrateMixin):
             block_hash = self.get_block_hash(block_number)
 
             if block_hash is None:
-                return
+                return None
 
         if block_hash and finalized_only:
             raise ValueError(
@@ -1383,7 +1366,7 @@ class SubstrateInterface(SubstrateMixin):
             block_hash = self.get_block_hash(block_number)
 
             if block_hash is None:
-                return
+                return None
 
         if block_hash and finalized_only:
             raise ValueError(
@@ -1528,7 +1511,6 @@ class SubstrateInterface(SubstrateMixin):
             module="System",
             storage_function="Events",
             block_hash=block_hash,
-            force_legacy_decode=False,
         )
         return events.value
 
@@ -1744,9 +1726,7 @@ class SubstrateInterface(SubstrateMixin):
                 q = bytes(query_value)
             else:
                 q = query_value
-            result = self.decode_scale(
-                value_scale_type, q, force_legacy=force_legacy_decode
-            )
+            result = self.decode_scale(value_scale_type, q)
         if isinstance(result_handler, Callable):
             # For multipart responses as a result of subscriptions.
             message, bool_result = result_handler(result, subscription_id)
@@ -2030,7 +2010,7 @@ class SubstrateInterface(SubstrateMixin):
             self.last_block_hash = block_hash
         self.init_runtime(block_hash=block_hash)
 
-        preprocessed: tuple[Preprocessed] = [
+        preprocessed: list[Preprocessed] = [
             self._preprocess([x], block_hash, storage_function, module) for x in params
         ]
         all_info = [
@@ -2640,9 +2620,7 @@ class SubstrateInterface(SubstrateMixin):
         )
         if constant:
             # Decode to ScaleType
-            return self.decode_scale(
-                constant.type, bytes(constant.constant_value), return_scale_obj=True
-            )
+            return self.decode_scale(constant.type, bytes(constant.constant_value))
         else:
             return None
 
@@ -2794,8 +2772,7 @@ class SubstrateInterface(SubstrateMixin):
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
         reuse_block_hash: bool = False,
-        force_legacy_decode: bool = False,
-    ) -> Optional[ScaleObj[Any]]:
+    ) -> Optional[ScaleType[Any]]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
         you should use ``self.query_multiple``
@@ -2820,13 +2797,9 @@ class SubstrateInterface(SubstrateMixin):
             value_scale_type,
             storage_item,
             result_handler=subscription_handler,
-            force_legacy_decode=force_legacy_decode,
         )
         result = responses[preprocessed.queryable][0]
-        if result is not None:
-            return ScaleObj(result)
-        else:
-            return result
+        return result
 
     def query_map(
         self,

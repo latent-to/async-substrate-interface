@@ -159,7 +159,7 @@ async def _record(output_path: str):
             try:
                 # Monkey-patch _async_decode_scale_list_with_runtime to capture inputs
                 _scenario_capture = {}
-                _orig_fn = _decoding_mod._async_decode_scale_list_with_runtime
+                _orig_fn = _decoding_mod._decode_scale_list_with_runtime
 
                 def _make_capture(lbl, store, orig):
                     async def _p(type_strings, bytes_list, rt, return_scale_obj=False):
@@ -177,7 +177,7 @@ async def _record(output_path: str):
 
                     return _p
 
-                _decoding_mod._async_decode_scale_list_with_runtime = _make_capture(
+                _decoding_mod._decode_scale_list_with_runtime = _make_capture(
                     label, _scenario_capture, _orig_fn
                 )
 
@@ -193,7 +193,7 @@ async def _record(output_path: str):
                     if label in _scenario_capture:
                         break  # one page is enough
 
-                _decoding_mod._async_decode_scale_list_with_runtime = _orig_fn
+                _decoding_mod._decode_scale_list_with_runtime = _orig_fn
 
                 if label in _scenario_capture:
                     captured[label] = _scenario_capture[label]
@@ -204,7 +204,7 @@ async def _record(output_path: str):
 
             except Exception as e:
                 print(f"  SKIP '{label}': {e}", flush=True)
-                _decoding_mod._async_decode_scale_list_with_runtime = _orig_fn
+                _decoding_mod._decode_scale_list_with_runtime = _orig_fn
 
     fixture = {
         "block_hash": block_hash,
