@@ -1657,7 +1657,7 @@ class SubstrateInterface(SubstrateMixin):
                 pallet=module,
                 storage_function=storage_function,
                 value_scale_type=value_scale_type,
-                metadata=self.metadata,
+                metadata=self.runtime.metadata,
                 runtime_config=self.runtime_config,
             )
         else:
