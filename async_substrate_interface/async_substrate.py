@@ -124,6 +124,8 @@ class AsyncExtrinsicReceipt:
             substrate: the AsyncSubstrateInterface instance
             extrinsic_hash: the hash of the extrinsic
             block_hash: the hash of the block on which this extrinsic exists
+            block_number: the block number on which this extrinsic exists
+            extrinsic_idx: the index of the extrinsic in the block
             finalized: whether the extrinsic is finalized
         """
         self.substrate = substrate
@@ -1473,6 +1475,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Args:
             block_hash: optional block hash, should not be specified if block_id is
             block_id: optional block id, should not be specified if block_hash is
+            init: if True, skip waiting for the startup runtime task
 
         Returns:
             Runtime object
@@ -2420,11 +2423,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         Args:
             block_hash: the hash of the block to be queried against
-            decode: Whether to decode the metadata or present it raw
+            runtime_config: RuntimeConfigurationObject for decoding the metadata
 
         Returns:
-            metadata, either as a dict (not decoded) or ScaleType (decoded); None if there was no response
-            from the server
+            decoded metadata as ScaleType; None if there was no response from the server
         """
         params = None
         if not runtime_config:
@@ -4202,12 +4204,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Retrieves a list of all events in metadata active for given block_hash (or chaintip if block_hash is omitted)
 
         Args:
-            block_hash
+            block_hash: hash of the block for which the metadata should be used
 
         Returns:
             list of module events
         """
-
         runtime = await self.init_runtime(block_hash=block_hash)
         return self._get_metadata_events(runtime)
 
