@@ -1381,17 +1381,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
-    async def _get_current_block_hash(
-        self, block_hash: Optional[str], reuse: bool
-    ) -> Optional[str]:
-        if block_hash:
-            self.last_block_hash = block_hash
-            return block_hash
-        elif reuse:
-            if self.last_block_hash:
-                return self.last_block_hash
-        return block_hash
-
     async def _load_registry_at_block(
         self, block_hash: Optional[str], runtime_config=None
     ):
@@ -2698,11 +2687,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
         params: Optional[list],
         result_handler: Optional[ResultHandler] = None,
         block_hash: Optional[str] = None,
-        reuse_block_hash: bool = False,
         runtime: Optional[Runtime] = None,
     ) -> Any:
         """
-        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multi` and
+        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
         `self.query_map` do not meet your needs.
 
         Args:
@@ -2711,15 +2699,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
             result_handler: ResultHandler
             block_hash: the hash of the block — only supply this if not supplying the block
                 hash in the params, and not reusing the block hash
-            reuse_block_hash: whether to reuse the block hash in the params — only mark as True
-                if not supplying the block hash in the params, or via the `block_hash` parameter
             runtime: Optional runtime to be used for decoding results of the request. If not specified, the
                 currently-loaded `self.runtime` is used.
 
         Returns:
             the response from the RPC request
         """
-        block_hash = await self._get_current_block_hash(block_hash, reuse_block_hash)
         params = params or []
         payload_id = f"{method}{random.randint(0, 7000)}"
         payloads = [
@@ -2745,7 +2730,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     params,
                     result_handler,
                     block_hash,
-                    reuse_block_hash,
                     runtime=runtime,
                 )
             elif (
@@ -2847,6 +2831,47 @@ class AsyncSubstrateInterface(SubstrateMixin):
         )
 
         return call
+
+    async def query_multiple(
+        self,
+        params: list,
+        storage_function: str,
+        module: str,
+        block_hash: Optional[str] = None,
+        runtime: Optional[Runtime] = None,
+    ) -> dict[str, ScaleType]:
+        """
+        Queries the subtensor. Only use this when making multiple queries, else use ``self.query``
+        """
+        # By allowing for specifying the block hash, users, if they have multiple query types they want
+        # to do, can simply query the block hash first, and then pass multiple query_subtensor calls
+        # into an asyncio.gather, with the specified block hash
+        if block_hash:
+            self.last_block_hash = block_hash
+        if runtime is None:
+            runtime = await self.init_runtime(block_hash=block_hash)
+        preprocessed: tuple[Preprocessed] = await asyncio.gather(
+            *[
+                self._preprocess(
+                    [x], block_hash, storage_function, module, runtime=runtime
+                )
+                for x in params
+            ]
+        )
+        all_info = [
+            self.make_payload(item.queryable, item.method, item.params)
+            for item in preprocessed
+        ]
+        # These will always be the same throughout the preprocessed list, so we just grab the first one
+        value_scale_type = preprocessed[0].value_scale_type
+        storage_item = preprocessed[0].storage_item
+
+        responses = await self._make_rpc_request(
+            all_info, value_scale_type, storage_item, runtime=runtime
+        )
+        return {
+            param: responses[p.queryable][0] for (param, p) in zip(params, preprocessed)
+        }
 
     async def query_multi(
         self,
@@ -3486,7 +3511,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         module_name: str,
         constant_name: str,
         block_hash: Optional[str] = None,
-        reuse_block_hash: bool = False,
         runtime: Optional[Runtime] = None,
     ) -> Optional[ScaleType[Any]]:
         """
@@ -3497,13 +3521,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
             module_name: Name of the module to query
             constant_name: Name of the constant to query
             block_hash: Hash of the block at which to make the runtime API call
-            reuse_block_hash: Reuse last-used block hash if set to true
             runtime: Runtime to use for querying the constant
 
         Returns:
              ScaleType from the runtime call
         """
-        block_hash = await self._get_current_block_hash(block_hash, reuse_block_hash)
         constant = await self.get_metadata_constant(
             module_name, constant_name, block_hash=block_hash, runtime=runtime
         )
@@ -3664,14 +3686,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
         block_hash: Optional[str] = None,
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
-        reuse_block_hash: bool = False,
         runtime: Optional[Runtime] = None,
     ) -> Optional[ScaleType[Any]]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
-        you should use `self.query_multi`
+        you should use `self.query_multiple`
         """
-        block_hash = await self._get_current_block_hash(block_hash, reuse_block_hash)
         if block_hash:
             self.last_block_hash = block_hash
         if runtime is None:
@@ -3712,7 +3732,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         start_key: Optional[str] = None,
         page_size: int = 100,
         ignore_decoding_errors: bool = False,
-        reuse_block_hash: bool = False,
         fully_exhaust: bool = False,
     ) -> AsyncQueryMapResult:
         """
@@ -3742,8 +3761,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
             page_size: The results are fetched from the node RPC in chunks of this size
             ignore_decoding_errors: When set this will catch all decoding errors, set the item to None and continue
                 decoding
-            reuse_block_hash: use True if you wish to make the query using the last-used block hash. Do not mark True
-                              if supplying a block_hash
             fully_exhaust: Pull the entire result at once, rather than paginating. Only use if you need the entire query
                 map result.
 
@@ -3751,7 +3768,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
              AsyncQueryMapResult object
         """
         params = params or []
-        block_hash = await self._get_current_block_hash(block_hash, reuse_block_hash)
         if block_hash:
             self.last_block_hash = block_hash
         runtime = await self.init_runtime(block_hash=block_hash)

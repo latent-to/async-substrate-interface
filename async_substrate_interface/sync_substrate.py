@@ -636,17 +636,6 @@ class SubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
-    def _get_current_block_hash(
-        self, block_hash: Optional[str], reuse: bool
-    ) -> Optional[str]:
-        if block_hash:
-            self.last_block_hash = block_hash
-            return block_hash
-        elif reuse:
-            if self.last_block_hash:
-                return self.last_block_hash
-        return block_hash
-
     def _load_registry_at_block(self, block_hash: Optional[str], runtime_config=None):
         # Should be called for any block that fails decoding.
         # Possibly the metadata was different.
@@ -1657,7 +1646,7 @@ class SubstrateInterface(SubstrateMixin):
                 pallet=module,
                 storage_function=storage_function,
                 value_scale_type=value_scale_type,
-                metadata=self.runtime.metadata,
+                metadata=self.metadata,
                 runtime_config=self.runtime_config,
             )
         else:
@@ -1866,10 +1855,9 @@ class SubstrateInterface(SubstrateMixin):
         params: Optional[list],
         result_handler: Optional[Callable] = None,
         block_hash: Optional[str] = None,
-        reuse_block_hash: bool = False,
     ) -> Any:
         """
-        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multi` and
+        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
         `self.query_map` do not meet your needs.
 
         Args:
@@ -1878,13 +1866,10 @@ class SubstrateInterface(SubstrateMixin):
             result_handler: Callback function that processes the result received from the node
             block_hash: the hash of the block — only supply this if not supplying the block
                 hash in the params, and not reusing the block hash
-            reuse_block_hash: whether to reuse the block hash in the params — only mark as True
-                if not supplying the block hash in the params, or via the `block_hash` parameter
 
         Returns:
             the response from the RPC request
         """
-        block_hash = self._get_current_block_hash(block_hash, reuse_block_hash)
         params = params or []
         payload_id = f"{method}{random.randint(0, 7000)}"
         payloads = [
@@ -1903,9 +1888,7 @@ class SubstrateInterface(SubstrateMixin):
                     "Failed to get runtime. Re-fetching from chain, and retrying."
                 )
                 self.init_runtime(block_hash=block_hash)
-                return self.rpc_request(
-                    method, params, result_handler, block_hash, reuse_block_hash
-                )
+                return self.rpc_request(method, params, result_handler, block_hash)
             elif (
                 "Client error: Api called for an unknown Block: State already discarded"
                 in err_msg
@@ -1990,6 +1973,36 @@ class SubstrateInterface(SubstrateMixin):
         )
 
         return call
+
+    def query_multiple(
+        self,
+        params: list,
+        storage_function: str,
+        module: str,
+        block_hash: Optional[str] = None,
+    ) -> dict[str, ScaleType]:
+        """
+        Queries the subtensor. Only use this when making multiple queries, else use ``self.query``
+        """
+        if block_hash:
+            self.last_block_hash = block_hash
+        self.init_runtime(block_hash=block_hash)
+
+        preprocessed: list[Preprocessed] = [
+            self._preprocess([x], block_hash, storage_function, module) for x in params
+        ]
+        all_info = [
+            self.make_payload(item.queryable, item.method, item.params)
+            for item in preprocessed
+        ]
+        # These will always be the same throughout the preprocessed list, so we just grab the first one
+        value_scale_type = preprocessed[0].value_scale_type
+        storage_item = preprocessed[0].storage_item
+
+        responses = self._make_rpc_request(all_info, value_scale_type, storage_item)
+        return {
+            param: responses[p.queryable][0] for (param, p) in zip(params, preprocessed)
+        }
 
     def query_multi(
         self, storage_keys: list[StorageKey], block_hash: Optional[str] = None
@@ -2549,7 +2562,6 @@ class SubstrateInterface(SubstrateMixin):
         module_name: str,
         constant_name: str,
         block_hash: Optional[str] = None,
-        reuse_block_hash: bool = False,
     ) -> Optional[ScaleType]:
         """
         Returns the decoded `ScaleType` object of the constant for given module name, call function name and block_hash
@@ -2559,12 +2571,10 @@ class SubstrateInterface(SubstrateMixin):
             module_name: Name of the module to query
             constant_name: Name of the constant to query
             block_hash: Hash of the block at which to make the runtime API call
-            reuse_block_hash: Reuse last-used block hash if set to true
 
         Returns:
              ScaleType from the runtime call
         """
-        block_hash = self._get_current_block_hash(block_hash, reuse_block_hash)
         constant = self.get_metadata_constant(
             module_name, constant_name, block_hash=block_hash
         )
@@ -2721,13 +2731,11 @@ class SubstrateInterface(SubstrateMixin):
         block_hash: Optional[str] = None,
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
-        reuse_block_hash: bool = False,
     ) -> Optional[ScaleType[Any]]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
-        you should use `self.query_multi`
+        you should use ``self.query_multiple``
         """
-        block_hash = self._get_current_block_hash(block_hash, reuse_block_hash)
         if block_hash:
             self.last_block_hash = block_hash
         self.init_runtime(block_hash=block_hash)
@@ -2761,7 +2769,6 @@ class SubstrateInterface(SubstrateMixin):
         start_key: Optional[str] = None,
         page_size: int = 100,
         ignore_decoding_errors: bool = False,
-        reuse_block_hash: bool = False,
     ) -> QueryMapResult:
         """
         Iterates over all key-pairs located at the given module and storage_function. The storage
@@ -2790,14 +2797,11 @@ class SubstrateInterface(SubstrateMixin):
             page_size: The results are fetched from the node RPC in chunks of this size
             ignore_decoding_errors: When set this will catch all decoding errors, set the item to None and continue
                 decoding
-            reuse_block_hash: use True if you wish to make the query using the last-used block hash. Do not mark True
-                              if supplying a block_hash
 
         Returns:
              QueryMapResult object
         """
         params = params or []
-        block_hash = self._get_current_block_hash(block_hash, reuse_block_hash)
         if block_hash:
             self.last_block_hash = block_hash
         runtime = self.init_runtime(block_hash=block_hash)
