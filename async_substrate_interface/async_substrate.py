@@ -2702,7 +2702,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         runtime: Optional[Runtime] = None,
     ) -> Any:
         """
-        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
+        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multi` and
         `self.query_map` do not meet your needs.
 
         Args:
@@ -3669,7 +3669,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
     ) -> Optional[ScaleType[Any]]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
-        you should use `self.query_multiple`
+        you should use `self.query_multi`
         """
         block_hash = await self._get_current_block_hash(block_hash, reuse_block_hash)
         if block_hash:
