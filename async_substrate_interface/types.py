@@ -822,15 +822,13 @@ class SubstrateMixin(ABC):
         """
         Helper function to serialize a constant
 
-        Parameters
-        ----------
-        constant
-        module
-        spec_version_id
+        Args:
+            constant:
+            module:
+            spec_version_id:
 
-        Returns
-        -------
-        dict
+        Returns:
+            dict
         """
         try:
             value_obj = self.runtime_config.create_scale_object(

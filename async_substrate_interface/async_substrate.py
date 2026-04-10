@@ -154,9 +154,9 @@ class AsyncExtrinsicReceipt:
     async def get_extrinsic_identifier(self) -> str:
         """
         Returns the on-chain identifier for this extrinsic in format "[block_number]-[extrinsic_idx]" e.g. 134324-2
-        Returns
-        -------
-        str
+
+        Returns:
+            str
         """
         if self.block_number is None:
             if self.block_hash is None:
@@ -201,9 +201,8 @@ class AsyncExtrinsicReceipt:
         """
         Retrieves the index of this extrinsic in containing block
 
-        Returns
-        -------
-        int
+        Returns:
+            int
         """
         if self.__extrinsic_idx is None:
             await self.retrieve_extrinsic()
@@ -215,9 +214,8 @@ class AsyncExtrinsicReceipt:
         Gets triggered events for submitted extrinsic. block_hash where extrinsic is included is required, manually
         set block_hash or use `wait_for_inclusion` when submitting extrinsic
 
-        Returns
-        -------
-        list
+        Returns:
+            list
         """
         if self.__triggered_events is None:
             if not self.block_hash:
@@ -337,10 +335,8 @@ class AsyncExtrinsicReceipt:
         Returns `True` if `ExtrinsicSuccess` event is triggered, `False` in case of `ExtrinsicFailed`
         In case of False `error_message` will contain more details about the error
 
-
-        Returns
-        -------
-        bool
+        Returns:
+            bool
         """
         if self.__is_success is None:
             await self.process_events()
@@ -354,9 +350,8 @@ class AsyncExtrinsicReceipt:
 
         `{'type': 'System', 'name': 'BadOrigin', 'docs': 'Bad origin'}`
 
-        Returns
-        -------
-        dict
+        Returns:
+            dict
         """
         if self.__error_message is None:
             if await self.is_success:
@@ -369,9 +364,8 @@ class AsyncExtrinsicReceipt:
         """
         Contains the actual weight when executing this extrinsic
 
-        Returns
-        -------
-        int (WeightV1) or dict (WeightV2)
+        Returns:
+            int (WeightV1) or dict (WeightV2)
         """
         if self.__weight is None:
             await self.process_events()
@@ -383,9 +377,8 @@ class AsyncExtrinsicReceipt:
         Contains the total fee costs deducted when executing this extrinsic. This includes fee for the validator
             (`Balances.Deposit` event) and the fee deposited for the treasury (`Treasury.Deposit` event)
 
-        Returns
-        -------
-        int
+        Returns:
+            int
         """
         if self.__total_fee_amount is None:
             await self.process_events()
@@ -1783,9 +1776,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Retrieves the details of a storage function for given module name, call function name and block_hash
 
         Args:
-            module_name
-            storage_name
-            block_hash
+            module_name:
+            storage_name:
+            block_hash:
             runtime: Optional `Runtime` whose metadata to use
 
         Returns:
@@ -1828,14 +1821,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Retrieves the details of an error for given module name, call function name and block_hash
 
         Args:
-        module_name: module name for the error lookup
-        error_name: error name for the error lookup
-        block_hash: hash of the blockchain block whose metadata to use
-        runtime: Optional `Runtime` whose metadata to use
+            module_name: module name for the error lookup
+            error_name: error name for the error lookup
+            block_hash: hash of the blockchain block whose metadata to use
+            runtime: Optional `Runtime` whose metadata to use
 
         Returns:
             error
-
         """
         if runtime is None:
             runtime = await self.init_runtime(block_hash=block_hash)
@@ -2667,13 +2659,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
     async def supports_rpc_method(self, name: str) -> bool:
         """
         Check if substrate RPC supports given method
-        Parameters
-        ----------
-        name: name of method to check
 
-        Returns
-        -------
-        bool
+        Args:
+            name: name of method to check
+
+        Returns:
+            bool
         """
         result = (await self.rpc_request("rpc_methods", [])).get("result")
         if result:
@@ -3259,9 +3250,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         """
         A pass-though to existing JSONRPC method `chain_getFinalizedHead`
 
-        Returns
-        -------
-
+        Returns:
         """
         response = await self.rpc_request("chain_getFinalizedHead", [])
         return response["result"]
@@ -3744,7 +3733,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         result = await substrate.query_map('System', 'Account', max_results=100)
 
         async for account, account_info in result:
-            print(f"Free balance of account '{account.value}': {account_info.value['data']['free']}")
+            print(f"Free balance of account '{account}': {account_info['data']['free']}")
         ```
 
         Note: it is important that you do not use `for x in result.records`, as this will sidestep possible
