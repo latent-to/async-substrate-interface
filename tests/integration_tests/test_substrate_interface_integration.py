@@ -86,24 +86,6 @@ def test_get_events_proper_decoding(substrate):
     print("test_get_events_proper_decoding succeeded")
 
 
-def test_query_multiple(substrate):
-    print("Testing test_query_multiple")
-    block = 6153277
-    cks = [
-        "5FH9AQM4kqbkdC9jyV5FrdEWVYt41nkhFstop7Vhyfb9ZsXt",
-        "5GQxLKxjZWNZDsghmYcw7P6ahC7XJCjx1WD94WGh92quSycx",
-        "5EcaPiDT1cv951SkCFsvdHDs2yAEUWhJDuRP9mHb343WnaVn",
-    ]
-    block_hash = substrate.get_block_hash(block_id=block)
-    assert substrate.query_multiple(
-        params=cks,
-        module="SubtensorModule",
-        storage_function="OwnedHotkeys",
-        block_hash=block_hash,
-    )
-    print("test_query_multiple succeeded")
-
-
 def test_query_map_with_odd_number_of_params(substrate):
     print("Testing test_query_map_with_odd_number_of_params")
     qm = substrate.query_map(

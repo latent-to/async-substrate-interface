@@ -1991,38 +1991,6 @@ class SubstrateInterface(SubstrateMixin):
 
         return call
 
-    def query_multiple(
-        self,
-        params: list,
-        storage_function: str,
-        module: str,
-        block_hash: Optional[str] = None,
-        reuse_block_hash: bool = False,
-    ) -> dict[str, ScaleType]:
-        """
-        Queries the subtensor. Only use this when making multiple queries, else use ``self.query``
-        """
-        block_hash = self._get_current_block_hash(block_hash, reuse_block_hash)
-        if block_hash:
-            self.last_block_hash = block_hash
-        self.init_runtime(block_hash=block_hash)
-
-        preprocessed: list[Preprocessed] = [
-            self._preprocess([x], block_hash, storage_function, module) for x in params
-        ]
-        all_info = [
-            self.make_payload(item.queryable, item.method, item.params)
-            for item in preprocessed
-        ]
-        # These will always be the same throughout the preprocessed list, so we just grab the first one
-        value_scale_type = preprocessed[0].value_scale_type
-        storage_item = preprocessed[0].storage_item
-
-        responses = self._make_rpc_request(all_info, value_scale_type, storage_item)
-        return {
-            param: responses[p.queryable][0] for (param, p) in zip(params, preprocessed)
-        }
-
     def query_multi(
         self, storage_keys: list[StorageKey], block_hash: Optional[str] = None
     ) -> list[tuple[StorageKey, Any]]:
