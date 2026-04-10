@@ -2,7 +2,10 @@ import bittensor_wallet
 import pytest
 from scalecodec import ss58_encode
 
-from async_substrate_interface.sync_substrate import SubstrateInterface
+from async_substrate_interface.sync_substrate import (
+    SubstrateInterface,
+    ExtrinsicReceipt,
+)
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT
 
 
@@ -713,3 +716,16 @@ def test_bits(substrate):
         params=[71],
     )
     assert isinstance(current_sqrt_price.value, dict)
+
+
+def test_same_events(substrate: SubstrateInterface):
+    block_hash = substrate.get_chain_finalised_head()
+    block = substrate.get_block_number(block_hash)
+    ext_idx = 1
+    events = substrate.get_events(block_hash=block_hash)
+    ext_receipt = ExtrinsicReceipt.create_from_extrinsic_identifier(
+        substrate, f"{block}-{ext_idx}"
+    )
+    ext_events = ext_receipt.triggered_events
+    events_for_ext = [e for e in events if e["extrinsic_idx"] == ext_idx]
+    assert ext_events == events_for_ext
