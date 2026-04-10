@@ -1434,7 +1434,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         scale_bytes: bytes,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> Optional[ScaleType[Any] | Any]:
+    ) -> Optional[ScaleType[Any]]:
         """
         Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given RUST type_string
         (e.g. BlockNumber). The relevant versioning information of the type (if defined) will be applied if block_hash
@@ -3398,9 +3398,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        return await self.decode_scale(
-            output_type_string, result_bytes, runtime=runtime
-        )
+        obj = await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
+        obj.decode()
+        return obj
 
     async def get_account_nonce(self, account_address: str) -> int:
         """
