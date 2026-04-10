@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Any
 
 from scalecodec import ScaleBytes
 from scalecodec.base import ScaleType
@@ -150,7 +150,7 @@ def decode_query_map(
 
 def scale_decode(
     type_string: str, scale_bytes: str | bytes | ScaleBytes, runtime: "Runtime"
-) -> ScaleType:
+) -> Any:
     if isinstance(scale_bytes, (str, bytes)):
         scale_bytes = ScaleBytes(scale_bytes)
 
@@ -160,4 +160,4 @@ def scale_decode(
 
     obj.decode(check_remaining=runtime.config.get("strict_scale_decode"))
 
-    return obj
+    return obj.value

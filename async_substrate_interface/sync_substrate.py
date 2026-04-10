@@ -2474,9 +2474,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        obj = self.decode_scale(output_type_string, result_bytes)
-        obj.decode()
-        return obj
+        return self.decode_scale(output_type_string, result_bytes)
 
     def get_account_nonce(self, account_address: str) -> int:
         """

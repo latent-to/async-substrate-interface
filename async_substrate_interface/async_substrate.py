@@ -3398,9 +3398,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        obj = await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
-        obj.decode()
-        return obj
+        return await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
 
     async def get_account_nonce(self, account_address: str) -> int:
         """
