@@ -823,12 +823,12 @@ class SubstrateMixin(ABC):
         Helper function to serialize a constant
 
         Args:
-            constant:
-            module:
-            spec_version_id:
+            constant: the constant item to serialize
+            module: the module in which the constant item is to be serialized
+            spec_version_id: spec version of the runtime
 
         Returns:
-            dict
+            dict containing constant data
         """
         try:
             value_obj = self.runtime_config.create_scale_object(

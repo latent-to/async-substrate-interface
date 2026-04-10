@@ -121,7 +121,7 @@ class ExtrinsicReceipt:
         Returns the on-chain identifier for this extrinsic in format "[block_number]-[extrinsic_idx]" e.g. 134324-2
 
         Returns:
-            str
+            Identifier for this extrinsic in format "[block_number]-[extrinsic_idx]" e.g. 134324-2
         """
         if self.block_number is None:
             if self.block_hash is None:
@@ -167,7 +167,7 @@ class ExtrinsicReceipt:
         Retrieves the index of this extrinsic in containing block
 
         Returns:
-            int
+            Index of this extrinsic in containing block
         """
         if self.__extrinsic_idx is None:
             self.retrieve_extrinsic()
@@ -180,7 +180,7 @@ class ExtrinsicReceipt:
         set block_hash or use `wait_for_inclusion` when submitting extrinsic
 
         Returns:
-            list
+            list of events
         """
         if self.__triggered_events is None:
             if not self.block_hash:
@@ -295,7 +295,7 @@ class ExtrinsicReceipt:
         In case of False `error_message` will contain more details about the error
 
         Returns:
-            bool
+            `True` if `ExtrinsicSuccess` event is triggered, `False` in case of `ExtrinsicFailed`
         """
         if self.__is_success is None:
             self.process_events()
@@ -310,7 +310,7 @@ class ExtrinsicReceipt:
         `{'type': 'System', 'name': 'BadOrigin', 'docs': 'Bad origin'}`
 
         Returns:
-            dict
+            error message if the extrinsic failed
         """
         if self.__error_message is None:
             if self.is_success:
@@ -337,7 +337,7 @@ class ExtrinsicReceipt:
             (`Balances.Deposit` event) and the fee deposited for the treasury (`Treasury.Deposit` event)
 
         Returns:
-            int
+            total fee costs deducted when executing this extrinsic
         """
         if self.__total_fee_amount is None:
             self.process_events()
@@ -986,9 +986,9 @@ class SubstrateInterface(SubstrateMixin):
         Retrieves the details of a storage function for given module name, call function name and block_hash
 
         Args:
-            module_name:
-            storage_name:
-            block_hash:
+            module_name: name of the module
+            storage_name: name of the storage function
+            block_hash: hash of the blockchain block whose runtime to use
 
         Returns:
             Metadata storage function
@@ -2352,11 +2352,12 @@ class SubstrateInterface(SubstrateMixin):
 
         return extrinsic
 
-    def get_chain_finalised_head(self):
+    def get_chain_finalised_head(self) -> str:
         """
         A pass-though to existing JSONRPC method `chain_getFinalizedHead`
 
         Returns:
+            Hash of the most-recently finalized block
         """
         response = self.rpc_request("chain_getFinalizedHead", [])
         return response["result"]
