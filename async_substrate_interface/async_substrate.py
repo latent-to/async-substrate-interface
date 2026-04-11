@@ -2668,6 +2668,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Returns:
             bool
         """
+        # TODO this should cache the methods per runtime version
         result = (await self.rpc_request("rpc_methods", [])).get("result")
         if result:
             self.config["rpc_methods"] = result.get("methods", [])
