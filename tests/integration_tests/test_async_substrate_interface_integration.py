@@ -352,7 +352,7 @@ async def test_old_runtime_calls_natively(substrate):
         params=[coldkey_ss58],
         block_hash=new_block_hash,
     )
-    assert result.value == [
+    assert result == [
         {
             "hotkey": "5CsvRJXuR955WojnGMdok1hbhffZyB4N5ocrv82f3p5A2zVp",
             "coldkey": "5CQ6dMW8JZhKCZX9kWsZRqa3kZRKmNHxbPPVFEt6FgyvGv2G",

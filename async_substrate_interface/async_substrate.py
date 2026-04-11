@@ -1695,7 +1695,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     )
 
                     subscription_result = await subscription_handler(
-                        storage_key, updated_obj, subscription_id
+                        storage_key, updated_obj.value, subscription_id
                     )
 
                     if subscription_result is not None:
@@ -3305,9 +3305,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
         if "error" in result_data:
             raise SubstrateRequestException(result_data["error"]["message"])
         result_vec_u8_bytes = hex_to_bytes(result_data["result"])
-        result_bytes = await self.decode_scale(
-            "Vec<u8>", result_vec_u8_bytes, runtime=runtime
-        )
+        result_bytes = (
+            await self.decode_scale("Vec<u8>", result_vec_u8_bytes, runtime=runtime)
+        ).value
+
+        # TODO check to see if we can use the bytes from the ScaleType rather than using the value
+        # TODO and then re-encoding as bytes
 
         # Decode result
         # Get correct type
@@ -3398,7 +3401,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        return await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
+        obj = await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
+        # protect against `None`s from decode_scale
+        return getattr(obj, "value", obj)
 
     async def get_account_nonce(self, account_address: str) -> int:
         """
@@ -3584,7 +3589,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             "TransactionPaymentApi", "query_info", [extrinsic, extrinsic_len]
         )
 
-        return result.value
+        return result
 
     async def get_type_registry(
         self, block_hash: Optional[str] = None, max_recursion: int = 4

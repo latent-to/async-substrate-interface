@@ -149,8 +149,17 @@ def decode_query_map(
 
 
 def scale_decode(
-    type_string: str, scale_bytes: str | bytes | ScaleBytes, runtime: "Runtime"
-) -> Any:
+    type_string: str,
+    scale_bytes: str | bytes | ScaleBytes,
+    runtime: "Runtime",
+) -> ScaleType[Any]:
+    """
+    Decodes a scale bytes using a type string and a Runtime object.
+
+    Returns:
+        The decoded Scale object as a ScaleType
+    """
+
     if isinstance(scale_bytes, (str, bytes)):
         scale_bytes = ScaleBytes(scale_bytes)
 
@@ -159,5 +168,4 @@ def scale_decode(
     )
 
     obj.decode(check_remaining=runtime.config.get("strict_scale_decode"))
-
-    return obj.value
+    return obj

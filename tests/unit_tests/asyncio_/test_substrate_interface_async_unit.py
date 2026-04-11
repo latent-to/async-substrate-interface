@@ -49,7 +49,9 @@ async def test_runtime_call(monkeypatch):
     substrate.encode_scale = AsyncMock()
 
     # Patch decode_scale to produce a dummy value
-    substrate.decode_scale = AsyncMock(return_value="decoded_result")
+    mock_scale_obj = MagicMock()
+    mock_scale_obj.value = "decoded_result"
+    substrate.decode_scale = AsyncMock(return_value=mock_scale_obj)
 
     # Patch RPC request with correct behavior
     substrate.rpc_request = AsyncMock(

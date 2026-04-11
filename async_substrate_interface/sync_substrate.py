@@ -920,7 +920,7 @@ class SubstrateInterface(SubstrateMixin):
                     updated_obj = self.decode_scale(
                         type_string=change_scale_type,
                         scale_bytes=hex_to_bytes(change_data),
-                    )
+                    ).value
 
                     subscription_result = subscription_handler(
                         storage_key, updated_obj, subscription_id
@@ -2368,7 +2368,7 @@ class SubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
-    ) -> ScaleType[Any]:
+    ) -> Any:
         logger.debug(
             f"Decoding old runtime call: {api}.{method} with params: {params} at block hash: {block_hash}"
         )
@@ -2391,7 +2391,7 @@ class SubstrateInterface(SubstrateMixin):
             "state_call", [f"{api}_{method}", param_hex, block_hash]
         )
         result_vec_u8_bytes = hex_to_bytes(result_data["result"])
-        result_bytes = self.decode_scale("Vec<u8>", result_vec_u8_bytes)
+        result_bytes = self.decode_scale("Vec<u8>", result_vec_u8_bytes).value
 
         # Decode result
         # Get correct type
@@ -2474,7 +2474,9 @@ class SubstrateInterface(SubstrateMixin):
 
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
-        return self.decode_scale(output_type_string, result_bytes)
+        obj = self.decode_scale(output_type_string, result_bytes)
+        # protect against `None`s from decode_scale
+        return getattr(obj, "value", obj)
 
     def get_account_nonce(self, account_address: str) -> int:
         """
@@ -2628,7 +2630,7 @@ class SubstrateInterface(SubstrateMixin):
             "TransactionPaymentApi", "query_info", [extrinsic, extrinsic_len]
         )
 
-        return result.value
+        return result
 
     def get_type_registry(
         self, block_hash: Optional[str] = None, max_recursion: int = 4
