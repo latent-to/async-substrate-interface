@@ -3412,10 +3412,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
             Nonce for given account address
         """
         if await self.supports_rpc_method("state_call"):
-            nonce_obj = await self.runtime_call(
+            nonce = await self.runtime_call(
                 "AccountNonceApi", "account_nonce", [account_address]
             )
-            return getattr(nonce_obj, "value", nonce_obj)
+            return nonce
         else:
             response = await self.query(
                 module="System", storage_function="Account", params=[account_address]
