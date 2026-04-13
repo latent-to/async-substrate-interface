@@ -5,10 +5,11 @@ permissions:
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 jobs:
   lint:
-    if: github.event.pull_request.draft == false
+    if: '!github.event.pull_request.draft'
     runs-on: ubuntu-latest
 
     steps:
