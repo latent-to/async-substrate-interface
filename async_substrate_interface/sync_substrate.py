@@ -798,10 +798,6 @@ class SubstrateInterface(SubstrateMixin):
             )
         else:
             metadata = self.get_block_metadata(block_hash=runtime_block_hash)
-            logger.debug(
-                f"Exported method Metadata_metadata_at_version is not found for {runtime_version}. "
-                f"This indicates the block is quite old, decoding for this block will use legacy Python decoding."
-            )
         if metadata is None:
             raise SubstrateRequestException(
                 f"No metadata for block '{runtime_block_hash}'"
