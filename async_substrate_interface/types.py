@@ -991,72 +991,20 @@ class SubstrateMixin(ABC):
             encoded bytes
         """
         if value is None:
-            result = b"\x00"
-        else:
-            if not runtime:
-                runtime = self.runtime
-            assert runtime is not None
-            try:
-                vec_acct_id = (
-                    f"scale_info::{runtime.registry_type_map['Vec<AccountId32>']}"
-                )
-            except KeyError:
-                vec_acct_id = "scale_info::152"
-            try:
-                optional_acct_u16 = f"scale_info::{runtime.registry_type_map['Option<(AccountId32, u16)>']}"
-            except KeyError:
-                optional_acct_u16 = "scale_info::579"
-
-            if type_string == "scale_info::0":  # Is an AccountId
-                # encode string into AccountId
-                ## AccountId is a composite type with one, unnamed field
-                return self._encode_account_id(value)
-
-            elif type_string == optional_acct_u16:
-                if value is None:
-                    return b"\x00"  # None
-
-                if not isinstance(value, (list, tuple)) or len(value) != 2:
-                    raise ValueError("Expected tuple of (account_id, u16)")
-                account_id, u16_value = value
-
-                result = b"\x01"
-                result += self._encode_account_id(account_id)
-                result += u16_value.to_bytes(2, "little")
-                return result
-
-            elif type_string == vec_acct_id:  # Vec<AccountId>
-                if not isinstance(value, (list, tuple)):
-                    value = [value]
-
-                # Encode length
-                length = len(value)
-                if length < 64:
-                    result = bytes([length << 2])  # Single byte mode
-                else:
-                    raise ValueError("Vector length too large")
-
-                # Encode each AccountId
-                for account in value:
-                    result += self._encode_account_id(account)
-                return result
-
-            if isinstance(value, ScaleType):
-                if value.data is not None and value.data.data is not None:
-                    # Already encoded
-                    return bytes(value.data.data)
-                else:
-                    value = value.value  # Unwrap the value of the type
-
-            result = bytes(
-                runtime.runtime_config.create_scale_object(type_string)
-                .encode(value)
-                .data
-            )
-        return result
+            return b"\x00"
+        if not runtime:
+            runtime = self.runtime
+        assert runtime is not None
+        if isinstance(value, ScaleType):
+            if value.data is not None and value.data.data is not None:
+                return bytes(value.data.data)
+            value = value.value
+        return bytes(
+            runtime.runtime_config.create_scale_object(type_string).encode(value).data
+        )
 
     @staticmethod
-    def _encode_scale_legacy(
+    def _encode_scale_without_encoder(
         call_definition: list[dict],
         params: list[Any] | dict[str, Any],
         runtime: Runtime,
@@ -1075,20 +1023,6 @@ class SubstrateMixin(ABC):
                 param_data += scale_obj.encode(params[param["name"]])
 
         return param_data
-
-    @staticmethod
-    def _encode_account_id(account) -> bytes:
-        """Encode an account ID into bytes.
-
-        Args:
-            account: Either bytes (already encoded) or SS58 string
-
-        Returns:
-            bytes: The encoded account ID
-        """
-        if isinstance(account, bytes):
-            return account  # Already encoded
-        return bytes.fromhex(ss58_decode(account, SS58_FORMAT))  # SS58 string
 
     def generate_multisig_account(
         self, signatories: list, threshold: int
