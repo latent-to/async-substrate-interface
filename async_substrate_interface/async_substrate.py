@@ -1419,7 +1419,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         runtime: Optional[Runtime] = None,
     ) -> bytes:
         """
-        Helper function to encode arbitrary data into SCALE-bytes for given RUST type_string. If neither `block_hash`
+        Helper function to encode arbitrary data into SCALE-bytes for given type_string. If neither `block_hash`
         nor `runtime` are supplied, the runtime of the current block will be used.
 
         Args:

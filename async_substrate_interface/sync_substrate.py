@@ -661,6 +661,27 @@ class SubstrateInterface(SubstrateMixin):
             return None
         return _decode_v15_metadata(inner_bytes, runtime_config=runtime_config)
 
+    def encode_scale(
+        self,
+        type_string,
+        value: Any,
+        block_hash: Optional[str] = None,
+    ) -> bytes:
+        """
+        Helper function to encode arbitrary data into SCALE-bytes for given type_string. If neither `block_hash`
+        nor `runtime` are supplied, the runtime of the current block will be used.
+
+        Args:
+            type_string: the type string of the SCALE object for decoding
+            value: value to encode
+            block_hash: hash of the block where the desired runtime is located. Ignored if supplying `runtime`
+
+        Returns:
+            encoded bytes
+        """
+        runtime = self.init_runtime(block_hash=block_hash)
+        return self._encode_scale(type_string, value, runtime=runtime)
+
     def decode_scale(
         self,
         type_string: str,
@@ -2398,7 +2419,7 @@ class SubstrateInterface(SubstrateMixin):
             param_data = runtime_call_def["encoder"](params, runtime)
             param_hex = param_data.hex()
         else:
-            param_data = self._encode_scale_legacy(
+            param_data = self._encode_scale_without_encoder(
                 runtime_call_def, params or [], runtime
             )
             param_hex = param_data.to_hex()
