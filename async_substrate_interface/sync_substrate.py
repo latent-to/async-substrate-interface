@@ -666,6 +666,7 @@ class SubstrateInterface(SubstrateMixin):
         type_string,
         value: Any,
         block_hash: Optional[str] = None,
+        runtime: Optional[Runtime] = None,
     ) -> bytes:
         """
         Helper function to encode arbitrary data into SCALE-bytes for given type_string. If neither `block_hash`
@@ -675,11 +676,13 @@ class SubstrateInterface(SubstrateMixin):
             type_string: the type string of the SCALE object for decoding
             value: value to encode
             block_hash: hash of the block where the desired runtime is located. Ignored if supplying `runtime`
+            runtime: the runtime to use for the scale encoding. If supplied, `block_hash` is ignored
 
         Returns:
             encoded bytes
         """
-        runtime = self.init_runtime(block_hash=block_hash)
+        if runtime is None:
+            runtime = self.init_runtime(block_hash=block_hash)
         return self._encode_scale(type_string, value, runtime=runtime)
 
     def decode_scale(
