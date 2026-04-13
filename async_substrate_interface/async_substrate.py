@@ -1019,6 +1019,8 @@ class Websocket:
                     ):
                         # if there's nothing in a queue, we really have no reason to have this, so we continue to wait
                         continue
+                    else:
+                        raise
         except websockets.exceptions.ConnectionClosedOK as e:
             logger.debug("ConnectionClosedOK")
             return e
