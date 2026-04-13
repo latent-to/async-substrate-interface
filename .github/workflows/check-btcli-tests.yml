@@ -52,7 +52,7 @@ jobs:
       run-cli-tests: ${{ steps.get-labels.outputs.run-cli-tests }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get labels from PR
         id: get-labels
@@ -145,7 +145,7 @@ jobs:
     name: "e2e tests: ${{ matrix.test-file }}"
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
@@ -208,7 +208,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |

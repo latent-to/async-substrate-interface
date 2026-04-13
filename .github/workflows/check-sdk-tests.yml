@@ -60,7 +60,7 @@ jobs:
       run-sdk-tests: ${{ steps.check-manual.outputs.run-sdk-tests || steps.get-labels-pr.outputs.run-sdk-tests }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Skip label check for manual runs
         id: check-manual
@@ -171,7 +171,7 @@ jobs:
     name: "e2e tests: ${{ matrix.test-file }}"
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
@@ -240,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
