@@ -23,7 +23,9 @@ import time
 from collections import deque
 from pathlib import Path
 
+from websockets import State
 from websockets.sync.client import ClientConnection
+from websockets.asyncio.client import ClientConnection as AsyncClientConnection
 
 from tests.helpers.integration_websocket_data import WEBSOCKET_RESPONSES
 
@@ -69,10 +71,105 @@ class FakeWebsocket(ClientConnection):
             response["jsonrpc"] = "2.0"
             return json.dumps(response)
         except (KeyError, TypeError):
-            print("ERROR", self.seed, item["method"], item["params"], type(item["params"]))
+            print(
+                "ERROR", self.seed, item["method"], item["params"], type(item["params"])
+            )
             raise
 
     def close(self, *args, **kwargs):
+        pass
+
+
+class AsyncFakeWebsocket(AsyncClientConnection):
+    close_code = None
+
+    def __init__(self, *_, seed, **kwargs):
+        self.seed = seed
+        self.received = asyncio.Queue()
+
+    @property
+    def state(self):
+        return State.CLOSED
+
+    async def send(self, payload, *args, **kwargs):
+        received = json.loads(payload)
+        received["jsonrpc"] = "2.0"
+        id_ = received.pop("id")
+        await self.received.put((received, id_))
+
+    async def recv(self, *args, **kwargs):
+        item, _id = await self.received.get()
+        try:
+            params_str = (
+                item["params"]
+                if isinstance(item["params"], str)
+                else json.dumps(item["params"])
+            )
+            if (
+                item["method"] == "state_call"
+                and "Metadata_metadata_at_version" in params_str
+            ):
+                response = {"id": _id, "result": METADATA_AT_VERSION}
+            else:
+                response = WEBSOCKET_RESPONSES[self.seed][item["method"]][params_str]
+                if isinstance(response, itertools.cycle):
+                    response = next(response)
+                response["id"] = _id
+            response["jsonrpc"] = "2.0"
+            return json.dumps(response)
+        except (KeyError, TypeError):
+            print(
+                "ERROR", self.seed, item["method"], item["params"], type(item["params"])
+            )
+            raise
+
+    async def close(self, *args, **kwargs):
+        pass
+
+
+class MockWebsocket:
+    """
+    A lightweight mock of the Websocket manager that routes RPC calls through
+    AsyncFakeWebsocket without needing a real network connection or the full
+    send/receive task machinery.
+    """
+
+    def __init__(self, seed: str):
+        self._fake_ws = AsyncFakeWebsocket(seed=seed)
+        self._responses: dict = {}
+        self._counter = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    async def mark_waiting_for_response(self):
+        pass
+
+    async def mark_response_received(self):
+        pass
+
+    async def send(self, payload: dict) -> str:
+        self._counter += 1
+        item_id = str(self._counter)
+        full_payload = json.dumps({**payload, "id": item_id})
+        await self._fake_ws.send(full_payload)
+        response_str = await self._fake_ws.recv()
+        self._responses[item_id] = json.loads(response_str)
+        return item_id
+
+    async def retrieve(self, item_id: str):
+        return self._responses.pop(item_id, None)
+
+    async def connect(self, *args, **kwargs):
+        pass
+
+    async def close(self):
+        pass
+
+    async def shutdown(self):
         pass
 
 

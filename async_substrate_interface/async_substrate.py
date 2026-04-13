@@ -1195,6 +1195,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         _ssl_context: Optional[_SessionResumingSSLContext] = None,
         dns_ttl: int = 300,
     ):
+        # TODO fix order of these params, and use * for kwarg-only
         """
         The asyncio-compatible version of the subtensor interface commands we use in bittensor. It is important to
         initialise this class asynchronously in an async context manager using `async with AsyncSubstrateInterface()`.

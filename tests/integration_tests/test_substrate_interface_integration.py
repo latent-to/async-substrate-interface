@@ -33,7 +33,7 @@ async def substrate():
 
 def get_mock_substrate(seed: str):
     sub = SubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor", _mock=True
+        "ws://127.0.0.1:9945", ss58_format=42, chain_name="Bittensor", _mock=True
     )
     sub.ws = FakeWebsocket(seed=seed)
     sub.initialize()
@@ -92,7 +92,10 @@ def test_get_events_proper_decoding():
     block_hash = "0x81617dc8ede17528d8f8aab64c84285a166f73e120ff6d2acd11e3419a95abec"
     all_events = substrate.get_events(block_hash=block_hash)
     event = all_events[1]
-    assert event["attributes"] == (53, '5CsvRJXuR955WojnGMdok1hbhffZyB4N5ocrv82f3p5A2zVp')
+    assert event["attributes"] == (
+        53,
+        "5CsvRJXuR955WojnGMdok1hbhffZyB4N5ocrv82f3p5A2zVp",
+    )
     print("test_get_events_proper_decoding succeeded")
 
 

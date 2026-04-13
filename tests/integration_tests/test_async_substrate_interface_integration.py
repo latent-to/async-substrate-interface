@@ -15,7 +15,9 @@ from async_substrate_interface.async_substrate import (
     AsyncSubstrateInterface,
     AsyncExtrinsicReceipt,
     logger,
+    Websocket,
 )
+from tests.helpers.fixtures import MockWebsocket
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 from tests.helpers.proxy_server import ProxyServer
 
@@ -43,6 +45,15 @@ async def substrate():
         yield _sub
     finally:
         await _sub.close()
+
+
+async def get_mock_substrate(seed: str):
+    sub = AsyncSubstrateInterface(
+        "ws://127.0.0.1", ss58_format=42, chain_name="Bittensor", _mock=True
+    )
+    sub.ws = MockWebsocket(seed=seed)
+    await sub.initialize()
+    return sub
 
 
 @pytest.mark.asyncio
@@ -74,8 +85,9 @@ async def test_legacy_decoding(substrate):
 
 
 @pytest.mark.asyncio
-async def test_ss58_conversion(substrate):
+async def test_ss58_conversion():
     print("Testing test_ss58_conversion")
+    substrate = await get_mock_substrate("test_ss58_conversion")
     block_hash = await substrate.get_chain_finalised_head()
 
     qm = await substrate.query_map(
@@ -136,17 +148,17 @@ async def test_fully_exhaust_query_map(substrate):
 
 
 @pytest.mark.asyncio
-async def test_get_events_proper_decoding(substrate):
+async def test_get_events_proper_decoding():
     print("Testing test_get_events_proper_decoding")
+    substrate = await get_mock_substrate("test_get_events_proper_decoding")
     # known block/hash pair that has the events we seek to decode
-    block = 5846788
-    block_hash = "0x0a1c45063a59b934bfee827caa25385e60d5ec1fd8566a58b5cc4affc4eec412"
+    block = 7959635
+    block_hash = "0x81617dc8ede17528d8f8aab64c84285a166f73e120ff6d2acd11e3419a95abec"
     all_events = await substrate.get_events(block_hash=block_hash)
     event = all_events[1]
     assert event["attributes"] == (
-        "5G1NjW9YhXLadMWajvTkfcJy6up3yH2q1YzMXDTi6ijanChe",
-        30,
-        "0xa6b4e5c8241d60ece0c25056b19f7d21ae845269fc771ad46bf3e011865129a5",
+        53,
+        "5CsvRJXuR955WojnGMdok1hbhffZyB4N5ocrv82f3p5A2zVp",
     )
     print("test_get_events_proper_decoding succeeded")
 
@@ -168,8 +180,9 @@ async def test_reconnection():
 
 
 @pytest.mark.asyncio
-async def test_query_map_with_odd_number_of_params(substrate):
+async def test_query_map_with_odd_number_of_params():
     print("Testing test_query_map_with_odd_number_of_params")
+    substrate = await get_mock_substrate("test_query_map_with_odd_number_of_params")
     qm = await substrate.query_map(
         "SubtensorModule",
         "Alpha",
@@ -250,8 +263,9 @@ async def test_improved_reconnection():
 
 
 @pytest.mark.asyncio
-async def test_get_payment_info(substrate, alice_coldkey, bob_coldkey):
+async def test_get_payment_info(alice_coldkey, bob_coldkey):
     print("Testing test_get_payment_info")
+    substrate = await get_mock_substrate("test_get_payment_info")
     block_hash = await substrate.get_chain_head()
     call = await substrate.compose_call(
         "Balances",
@@ -896,7 +910,8 @@ async def test_old_runtime_calls_natively(substrate):
     ]
 
 
-async def test_bits(substrate):
+async def test_bits():
+    substrate = await get_mock_substrate("test_bits")
     current_sqrt_price = await substrate.query(
         module="Swap",
         storage_function="AlphaSqrtPrice",
@@ -905,7 +920,8 @@ async def test_bits(substrate):
     assert isinstance(current_sqrt_price.value, dict)
 
 
-async def test_same_events(substrate: AsyncSubstrateInterface):
+async def test_same_events():
+    substrate = await get_mock_substrate("test_same_events")
     block_hash = await substrate.get_chain_finalised_head()
     block = await substrate.get_block_number(block_hash)
     ext_idx = 1
