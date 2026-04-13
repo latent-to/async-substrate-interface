@@ -11,7 +11,6 @@ concurrency:
 on:
   pull_request:
     branches:
-      - main
       - staging
       - master
     types: [opened, synchronize, reopened, labeled, unlabeled]
