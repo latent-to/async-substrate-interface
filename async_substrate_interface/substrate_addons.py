@@ -347,8 +347,9 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
         except (
             MaxRetriesExceeded,
             ConnectionError,
-            ConnectionClosed,
             EOFError,
+            ConnectionClosed,
+            TimeoutError,
             socket.gaierror,
             StateDiscardedError,
         ) as e:
