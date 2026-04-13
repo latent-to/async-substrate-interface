@@ -29,10 +29,10 @@ def _check_conflicts():
 _check_conflicts()
 
 __all__ = [
-    AsyncQueryMapResult,
-    AsyncSubstrateInterface,
-    AsyncExtrinsicReceipt,
-    QueryMapResult,
-    SubstrateInterface,
-    ExtrinsicReceipt,
+    "AsyncQueryMapResult",
+    "AsyncSubstrateInterface",
+    "AsyncExtrinsicReceipt",
+    "QueryMapResult",
+    "SubstrateInterface",
+    "ExtrinsicReceipt",
 ]

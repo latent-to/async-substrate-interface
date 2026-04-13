@@ -10,10 +10,11 @@ from datetime import datetime
 from typing import Optional, Union, Any, Sequence, Generic, TypeVar
 
 import scalecodec.types
-from scalecodec import ss58_encode, ss58_decode, is_valid_ss58_address
-from scalecodec.base import RuntimeConfigurationObject, ScaleBytes, ScaleType
+from scalecodec import ScaleBytes
+from scalecodec.base import RuntimeConfigurationObject, ScaleType
 from scalecodec.type_registry import load_type_registry_preset
-from scalecodec.types import GenericCall, ScaleType, MultiAccountId
+from scalecodec.types import GenericCall, MultiAccountId
+from scalecodec.utils.ss58 import ss58_encode, ss58_decode, is_valid_ss58_address
 
 from .const import SS58_FORMAT
 from .utils.cache import AsyncSqliteDB, LRUCache
@@ -39,9 +40,9 @@ class RuntimeCache:
     is important you are utilizing the correct version.
     """
 
-    blocks: dict[int, str]
-    block_hashes: dict[str, int]
-    versions: dict[int, "Runtime"]
+    blocks: LRUCache
+    block_hashes: LRUCache
+    versions: LRUCache
     last_used: Optional["Runtime"]
 
     def __init__(self, known_versions: Optional[Sequence[tuple[int, int]]] = None):
@@ -225,7 +226,7 @@ def _decode_v15_metadata(
     """
     if runtime_config is None:
         rc = RuntimeConfigurationObject()
-        rc.update_type_registry(load_type_registry_preset(name="core"))
+        rc.update_type_registry(load_type_registry_preset(name="core") or {})
     else:
         rc = runtime_config
     meta_obj = rc.create_scale_object(
@@ -241,14 +242,14 @@ class Runtime:
     decoding. Currently only Metadata V15 is supported for decoding, though we plan to release legacy decoding options.
     """
 
-    runtime_version: Optional[int] = None
-    transaction_version = None
-    cache_region = None
-    metadata = None
-    metadata_v15 = None
+    runtime_version: Optional[int]
+    transaction_version: Any
+    cache_region: Any
+    metadata: scalecodec.types.GenericMetadataVersioned
+    metadata_v15: Optional[Any]
     runtime_config: RuntimeConfigurationObject
-    runtime_info = None
-    type_registry_preset = None
+    runtime_info: Optional[dict]
+    type_registry_preset: Optional[str]
     registry_type_map: dict[str, int]
     type_id_to_name: dict[int, str]
     runtime_api_map: dict[str, dict[str, Any]]
@@ -265,7 +266,7 @@ class Runtime:
         **kwargs,
     ):
         self.ss58_format = ss58_format
-        self.config = {}
+        self.config: dict[str, Any] = {}
         self.chain = chain
         self.type_registry = type_registry
         self.metadata = metadata
@@ -308,7 +309,9 @@ class Runtime:
         ss58_format = serialized["ss58_format"]
         runtime_config = RuntimeConfigurationObject(ss58_format=ss58_format)
         runtime_config.clear_type_registry()
-        runtime_config.update_type_registry(load_type_registry_preset(name="core"))
+        runtime_config.update_type_registry(
+            load_type_registry_preset(name="core") or {}
+        )
         metadata = runtime_config.create_scale_object(
             "MetadataVersioned", data=ScaleBytes(serialized["metadata_value"])
         )
@@ -320,10 +323,10 @@ class Runtime:
             # New format: raw MetadataVersioned bytes (starts with 'meta' magic 0x6d657461).
             _METADATA_MAGIC = b"\x6d\x65\x74\x61"
             if v15_bytes[:4] != _METADATA_MAGIC:
-                v15_bytes = _decode_option_opaque_metadata(v15_bytes)
-            if v15_bytes is not None:
+                v15_bytes = _decode_option_opaque_metadata(v15_bytes) or b""
+            if v15_bytes:
                 metadata_v15 = _decode_v15_metadata(v15_bytes)
-        elif metadata.get_metadata().index >= 15:
+        elif metadata.get_metadata().index >= 15:  # type: ignore[attr-defined]
             # metadata itself is V15 (stored as metadata_value); use it as metadata_v15 too
             metadata_v15 = metadata
         return cls(
@@ -360,14 +363,11 @@ class Runtime:
             self.runtime_config.update_type_registry_types({"Weight": "WeightV1"})
 
     @property
-    def implements_scaleinfo(self) -> Optional[bool]:
+    def implements_scaleinfo(self) -> bool:
         """
         Returns True if current runtime implements a `PortableRegistry` (`MetadataV14` and higher)
         """
-        if self.metadata:
-            return self.metadata.portable_registry is not None
-        else:
-            return None
+        return self.metadata.portable_registry is not None
 
     def __str__(self):
         return f"Runtime: {self.chain} | {self.config}"
@@ -390,7 +390,9 @@ class Runtime:
         self.runtime_config.implements_scale_info = self.implements_scaleinfo
 
         # Load metadata types in runtime configuration
-        self.runtime_config.update_type_registry(load_type_registry_preset(name="core"))
+        self.runtime_config.update_type_registry(
+            load_type_registry_preset(name="core") or {}
+        )
         self.apply_type_registry_presets(
             use_remote_preset=use_remote_preset, auto_discover=auto_discover
         )
@@ -440,6 +442,7 @@ class Runtime:
                     load_type_registry_preset(
                         "legacy", use_remote_preset=use_remote_preset
                     )
+                    or {}
                 )
 
             if self.type_registry_preset != "legacy":
@@ -455,9 +458,10 @@ class Runtime:
         """
         registry_type_map = {}
         type_id_to_name = {}
+        portable_registry = self.metadata.portable_registry
+        assert portable_registry is not None
         types = [
-            st.value
-            for st in self.metadata.portable_registry.value_object["types"].value_object
+            st.value for st in portable_registry.value_object["types"].value_object
         ]
         type_by_id = {entry["id"]: entry for entry in types}
 
@@ -641,20 +645,20 @@ class Preprocessed:
 
 
 class SubstrateMixin(ABC):
-    type_registry_preset = None
-    transaction_version = None
+    type_registry_preset: Optional[str] = None
+    transaction_version: Any = None
     last_block_hash: Optional[str] = None
     _name: Optional[str] = None
-    _properties = None
-    _version = None
-    _token_decimals = None
-    _token_symbol = None
+    _properties: Any = None
+    _version: Any = None
+    _token_decimals: Any = None
+    _token_symbol: Any = None
     _chain: str
     runtime_config: RuntimeConfigurationObject
     type_registry: Optional[dict]
     ss58_format: Optional[int]
     ws_max_size = 2**32
-    runtime: Runtime = None  # TODO remove
+    runtime: Optional[Runtime] = None  # TODO remove
 
     def __init__(
         self,
@@ -666,7 +670,9 @@ class SubstrateMixin(ABC):
         # We load a very basic RuntimeConfigurationObject that is only used for the initial metadata decoding
         self.runtime_config = RuntimeConfigurationObject(ss58_format=ss58_format)
         self.ss58_format = ss58_format
-        self.runtime_config.update_type_registry(load_type_registry_preset(name="core"))
+        self.runtime_config.update_type_registry(
+            load_type_registry_preset(name="core") or {}
+        )
         if type_registry_preset is not None:
             type_registry_preset_dict = load_type_registry_preset(
                 name=type_registry_preset, use_remote_preset=use_remote_preset
@@ -681,6 +687,7 @@ class SubstrateMixin(ABC):
         if type_registry_preset_dict:
             self.runtime_config.update_type_registry(
                 load_type_registry_preset("legacy", use_remote_preset=use_remote_preset)
+                or {}
             )
             if type_registry_preset != "legacy":
                 self.runtime_config.update_type_registry(type_registry_preset_dict)
@@ -708,7 +715,9 @@ class SubstrateMixin(ABC):
         """
         return self._chain
 
-    def ss58_encode(self, public_key: str | bytes, ss58_format: int = None) -> str:
+    def ss58_encode(
+        self, public_key: str | bytes, ss58_format: Optional[int] = None
+    ) -> str:
         """
         Helper function to encode a public key to SS58 address.
 
@@ -725,7 +734,7 @@ class SubstrateMixin(ABC):
         if ss58_format is None:
             ss58_format = self.ss58_format
 
-        return ss58_encode(public_key, ss58_format=ss58_format)
+        return ss58_encode(public_key, ss58_format=ss58_format or 42)
 
     def ss58_decode(self, ss58_address: str) -> str:
         """
@@ -772,9 +781,8 @@ class SubstrateMixin(ABC):
         """
         if not runtime:
             runtime = self.runtime
-            metadata = self.metadata
-        else:
-            metadata = runtime.metadata
+        assert runtime is not None
+        metadata = runtime.metadata
 
         storage_dict = {
             "storage_name": storage_item.name,
@@ -782,7 +790,7 @@ class SubstrateMixin(ABC):
             "storage_default_scale": storage_item["default"].get_used_bytes(),
             "storage_default": None,
             "documentation": "\n".join(storage_item.docs),
-            "module_id": module.get_identifier(),
+            "module_id": module.get_identifier(),  # type: ignore[attr-defined]
             "module_prefix": module.value["storage"]["prefix"],
             "module_name": module.name,
             "spec_version": spec_version_id,
@@ -844,7 +852,7 @@ class SubstrateMixin(ABC):
             "constant_value": constant_decoded_value,
             "constant_value_scale": f"0x{constant.constant_value.hex()}",
             "documentation": "\n".join(constant.docs),
-            "module_id": module.get_identifier(),
+            "module_id": module.get_identifier(),  # type: ignore[attr-defined]
             "module_prefix": module.value["storage"]["prefix"]
             if module.value["storage"]
             else None,
@@ -866,9 +874,9 @@ class SubstrateMixin(ABC):
             dict serialized version of the call function
         """
         return {
-            "call_name": call.name,
-            "call_args": [call_arg.value for call_arg in call.args],
-            "documentation": "\n".join(call.docs),
+            "call_name": call.name,  # type: ignore[attr-defined]
+            "call_args": [call_arg.value for call_arg in call.args],  # type: ignore[attr-defined]
+            "documentation": "\n".join(call.docs),  # type: ignore[attr-defined]
             "module_prefix": module.value["storage"]["prefix"]
             if module.value["storage"]
             else None,
@@ -899,7 +907,7 @@ class SubstrateMixin(ABC):
             ],
             "lookup": f"0x{event_index}",
             "documentation": "\n".join(event.docs),
-            "module_id": module.get_identifier(),
+            "module_id": module.get_identifier(),  # type: ignore[attr-defined]
             "module_prefix": module.prefix,
             "module_name": module.name,
             "spec_version": spec_version,
@@ -921,7 +929,7 @@ class SubstrateMixin(ABC):
         return {
             "error_name": error.name,
             "documentation": "\n".join(error.docs),
-            "module_id": module.get_identifier(),
+            "module_id": module.get_identifier(),  # type: ignore[attr-defined]
             "module_prefix": module.value["storage"]["prefix"]
             if module.value["storage"]
             else None,
@@ -985,6 +993,7 @@ class SubstrateMixin(ABC):
         else:
             if not runtime:
                 runtime = self.runtime
+            assert runtime is not None
             try:
                 vec_acct_id = (
                     f"scale_info::{runtime.registry_type_map['Vec<AccountId32>']}"
@@ -1031,7 +1040,7 @@ class SubstrateMixin(ABC):
                 return result
 
             if isinstance(value, ScaleType):
-                if value.data.data is not None:
+                if value.data is not None and value.data.data is not None:
                     # Already encoded
                     return bytes(value.data.data)
                 else:
@@ -1049,7 +1058,7 @@ class SubstrateMixin(ABC):
         call_definition: list[dict],
         params: list[Any] | dict[str, Any],
         runtime: Runtime,
-    ) -> bytes:
+    ) -> scalecodec.ScaleBytes:
         """Returns a hex encoded string of the params using their types."""
         param_data = scalecodec.ScaleBytes(b"")
 
@@ -1097,8 +1106,8 @@ class SubstrateMixin(ABC):
             signatories, threshold
         )
 
-        multi_sig_account.ss58_address = ss58_encode(
-            multi_sig_account.value.replace("0x", ""), self.ss58_format
+        multi_sig_account.ss58_address = ss58_encode(  # type: ignore[attr-defined]
+            multi_sig_account.value.replace("0x", ""), self.ss58_format or 42
         )
 
         return multi_sig_account
@@ -1110,7 +1119,7 @@ class SubstrateMixin(ABC):
         """
         See subclass `get_metadata_call_functions` for documentation.
         """
-        data = {}
+        data: dict[str, Any] = {}
         for pallet in runtime.metadata.pallets:
             data[pallet.name] = {}
             for call in pallet.calls:
@@ -1202,7 +1211,7 @@ class SubstrateMixin(ABC):
         return [
             {
                 "metadata_index": idx,
-                "module_id": module.get_identifier(),
+                "module_id": module.get_identifier(),  # type: ignore[attr-defined]
                 "name": module.name,
                 "spec_version": runtime.runtime_version,
                 "count_call_functions": len(module.calls or []),
@@ -1226,8 +1235,8 @@ class SubstrateMixin(ABC):
                     storage_list.append(
                         self.serialize_storage_item(
                             storage_item=storage,
-                            module=module,
-                            spec_version_id=runtime.runtime_version,
+                            module=module,  # type: ignore[arg-type]
+                            spec_version_id=runtime.runtime_version or 0,
                             runtime=runtime,
                         )
                     )
@@ -1293,7 +1302,7 @@ class SubstrateMixin(ABC):
         )
         runtime_call_def_obj.encode(runtime_call_def)
 
-        return runtime_call_def_obj
+        return runtime_call_def_obj  # type: ignore[return-value]
 
     def _get_metadata_runtime_call_functions(
         self, runtime: Runtime

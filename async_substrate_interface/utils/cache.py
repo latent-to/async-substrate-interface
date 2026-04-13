@@ -31,7 +31,7 @@ logger = logging.getLogger("async_substrate_interface")
 class AsyncSqliteDB:
     _instances: dict[str, "AsyncSqliteDB"] = {}
     _db: Optional[aiosqlite.Connection] = None
-    _lock: Optional[asyncio.Lock] = None
+    _lock: asyncio.Lock
     _created_tables: set
 
     def __new__(cls, chain_endpoint: str):
@@ -55,6 +55,7 @@ class AsyncSqliteDB:
         if table_name in self._created_tables:
             return _check_if_local(chain)
         if not (local_chain := _check_if_local(chain)) or not USE_CACHE:
+            assert self._db is not None
             await self._db.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {table_name} 
@@ -117,6 +118,7 @@ class AsyncSqliteDB:
         return result
 
     async def _ensure_dns_table(self):
+        assert self._db is not None
         await self._db.execute(
             """CREATE TABLE IF NOT EXISTS dns_cache (
                 url TEXT PRIMARY KEY,
@@ -178,10 +180,10 @@ class AsyncSqliteDB:
             if not self._db:
                 _ensure_dir()
                 self._db = await aiosqlite.connect(CACHE_LOCATION)
-        block_mapping = OrderedDict()
-        block_hash_mapping = OrderedDict()
-        version_mapping = OrderedDict()
-        tables = {
+        block_mapping: OrderedDict[int, str] = OrderedDict()
+        block_hash_mapping: OrderedDict[str, int] = OrderedDict()
+        version_mapping: OrderedDict[int, dict] = OrderedDict()
+        tables: dict[str, OrderedDict] = {
             "RuntimeCache_blocks": block_mapping,
             "RuntimeCache_block_hashes": block_hash_mapping,
             "RuntimeCache_versions": version_mapping,
@@ -194,6 +196,7 @@ class AsyncSqliteDB:
         for table_name, mapping in tables.items():
             try:
                 async with self._lock:
+                    assert self._db is not None
                     cursor: aiosqlite.Cursor = await self._db.execute(
                         f"SELECT key, value FROM {table_name} WHERE chain=?",
                         (chain,),
@@ -383,7 +386,7 @@ class LRUCache:
 
     def __init__(self, max_size: int):
         self.max_size = max_size
-        self.cache = OrderedDict()
+        self.cache: OrderedDict = OrderedDict()
 
     def set(self, key, value):
         if key in self.cache:

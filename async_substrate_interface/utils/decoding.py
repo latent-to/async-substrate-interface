@@ -31,18 +31,21 @@ def try_batch_decode(
     if not runtime.implements_scaleinfo:
         return [sk.decode_scale_value(data).value for sk, data in items]
 
-    type_strings = []
+    type_strings: list[str] = []
     raw_bytes_list = []
     for storage_key, data in items:
         msf = storage_key.metadata_storage_function
+        assert msf is not None
+        vst = storage_key.value_scale_type
+        assert vst is not None
         if data is not None:
-            type_strings.append(storage_key.value_scale_type)
+            type_strings.append(vst)
             raw_bytes_list.append(bytes(data.data))
         elif msf.value["modifier"] == "Default":
-            type_strings.append(storage_key.value_scale_type)
+            type_strings.append(vst)
             raw_bytes_list.append(bytes(msf.value_object["default"].value_object))
         else:
-            type_strings.append(f"Option<{storage_key.value_scale_type}>")
+            type_strings.append(f"Option<{vst}>")
             raw_bytes_list.append(bytes(msf.value_object["default"].value_object))
 
     return runtime.runtime_config.batch_decode(type_strings, raw_bytes_list)
@@ -167,5 +170,5 @@ def scale_decode(
         type_string=type_string, data=scale_bytes, metadata=runtime.metadata
     )
 
-    obj.decode(check_remaining=runtime.config.get("strict_scale_decode"))
+    obj.decode(check_remaining=runtime.config.get("strict_scale_decode") or False)
     return obj

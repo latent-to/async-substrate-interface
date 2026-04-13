@@ -1,8 +1,9 @@
 from collections import namedtuple
 from typing import TYPE_CHECKING, Any
 
-from scalecodec import ss58_decode
-from scalecodec.base import ScaleBytes, RuntimeConfigurationObject
+from scalecodec import ScaleBytes
+from scalecodec.base import RuntimeConfigurationObject
+from scalecodec.utils.ss58 import ss58_decode
 from scalecodec.type_registry import load_type_registry_preset
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ def _get_legacy_rc(ss58_format: int | None = None) -> RuntimeConfigurationObject
     global _legacy_rc
     if _legacy_rc is None:
         rc = RuntimeConfigurationObject(ss58_format=ss58_format)
-        rc.update_type_registry(load_type_registry_preset(name="legacy"))
+        rc.update_type_registry(load_type_registry_preset(name="legacy") or {})
         rc.update_type_registry(_BITTENSOR_LEGACY_TYPES)
         _legacy_rc = rc
     return _legacy_rc
