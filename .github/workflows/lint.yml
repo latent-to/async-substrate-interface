@@ -1,0 +1,52 @@
+name: Lint
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache venv
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: venv
+          key: v1-lint-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install deps
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install uv
+          python -m uv sync --extra dev --active
+
+      - name: ruff check
+        run: |
+          source venv/bin/activate
+          ruff check async_substrate_interface/
+
+      - name: ruff format
+        run: |
+          source venv/bin/activate
+          ruff format --check async_substrate_interface/
+
+      - name: mypy
+        run: |
+          source venv/bin/activate
+          mypy async_substrate_interface/
