@@ -1,5 +1,3 @@
-import asyncio
-import tracemalloc
 from unittest.mock import AsyncMock, MagicMock, ANY
 
 import pytest

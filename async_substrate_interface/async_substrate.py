@@ -783,10 +783,10 @@ class Websocket:
             self._exit_task.cancel()
         logger.debug(f"self.state={self.state}")
         if force and self.state == State.OPEN:
-            logger.debug(f"Attempting to reconnect while already connected.")
+            logger.debug("Attempting to reconnect while already connected.")
             if self.ws is not None:
                 self.ws.protocol.fail(CloseCode.SERVICE_RESTART)
-            logger.debug(f"Open connection cancelled.")
+            logger.debug("Open connection cancelled.")
             await asyncio.sleep(1)
         if self.state not in (State.OPEN, State.CONNECTING) or force:
             if not force:
@@ -794,7 +794,7 @@ class Websocket:
                     logger.debug("Attempting cancellation")
                     await asyncio.wait_for(self._cancel(), timeout=10.0)
                 except asyncio.TimeoutError:
-                    logger.debug(f"Timed out waiting for cancellation")
+                    logger.debug("Timed out waiting for cancellation")
                     pass
             logger.debug("Attempting connection")
             loop = asyncio.get_running_loop()
@@ -814,7 +814,7 @@ class Websocket:
                     connect(self.ws_url, sock=tcp_sock, **self._options), timeout=10.0
                 )
             except socket.gaierror:
-                logger.debug(f"Hostname not known (this is just for testing")
+                logger.debug("Hostname not known (this is just for testing")
                 await asyncio.sleep(10)
                 return await self.connect(force=force)
             logger.debug("Connection established")
@@ -890,7 +890,7 @@ class Websocket:
         if should_reconnect is True:
             if len(self._received_subscriptions) > 0:
                 return SubstrateRequestException(
-                    f"Unable to reconnect because there are currently open subscriptions."
+                    "Unable to reconnect because there are currently open subscriptions."
                 )
 
             if is_retry:
@@ -921,8 +921,8 @@ class Websocket:
             return e
         elif len(self._received_subscriptions) > 0:
             return SubstrateRequestException(
-                f"Currently open subscriptions while disconnecting. "
-                f"Ensure these are unsubscribed from before closing in the future."
+                "Currently open subscriptions while disconnecting. "
+                "Ensure these are unsubscribed from before closing in the future."
             )
         return None
 
@@ -1041,7 +1041,7 @@ class Websocket:
                         fut.set_exception(e)
                         fut.cancel()
             else:
-                logger.debug(f"Timeout/ConnectionClosed occurred.")
+                logger.debug("Timeout/ConnectionClosed occurred.")
             return e
 
     async def _start_sending(self, ws) -> Exception:

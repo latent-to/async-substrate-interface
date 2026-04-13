@@ -118,7 +118,7 @@ async def test_old_runtime_calls():
     )
     await sub.initialize()
     # will pass
-    l = await sub.get_stake_info_for_coldkey(
+    _ = await sub.get_stake_info_for_coldkey(
         "5CQ6dMW8JZhKCZX9kWsZRqa3kZRKmNHxbPPVFEt6FgyvGv2G", 4943592
     )
     # needs to use legacy

@@ -32,17 +32,18 @@ for _p in (_REPO_ROOT, _CY_SCALE_PATH):
 # Imports
 # ---------------------------------------------------------------------------
 
-from bt_decode import MetadataV15, PortableRegistry
+from bt_decode import PortableRegistry
 from bt_decode import decode as bt_decode_one
 from bt_decode import decode_list as bt_decode_many
 
 import scalecodec
 
-print(f"scalecodec: {scalecodec.__file__}", flush=True)
-
-from scalecodec.base import RuntimeConfigurationObject, ScaleBytes
+from scalecodec.base import RuntimeConfigurationObject
+from scalecodec import ScaleBytes
 from scalecodec.type_registry import load_type_registry_preset
-from scalecodec import ss58_encode as _ss58_encode
+from scalecodec.utils.ss58 import ss58_encode as _ss58_encode
+
+print(f"scalecodec: {scalecodec.__file__}", flush=True)
 
 # ---------------------------------------------------------------------------
 # cyscale helpers
@@ -119,7 +120,6 @@ def bt_decode_one_with_ss58(type_string, registry, data):
 
 async def _record(output_path: str):
     """Connect to a live Bittensor node, capture real decode inputs, save fixtures."""
-    import bt_decode as _bt_module
     from tests.helpers.settings import LATENT_LITE_ENTRYPOINT
     from async_substrate_interface.async_substrate import AsyncSubstrateInterface
 
@@ -323,7 +323,7 @@ def bench(fixture_path: str, iters: int):
     # For the Uids scenario: key type "[u8;0], scale_info::U16, [u8;16], scale_info::AccountId"
     # We know value type scale_info::40 = u16 from the Uids value type.
     # Simulate N=100 Blake2_128Concat-hashed keys (before vs after the prefix skip).
-    import os as _os, re as _re
+    import re as _re
 
     _synth_n = 100
 

@@ -3,11 +3,10 @@ import logging
 import os
 from abc import ABC
 from collections import defaultdict, deque, OrderedDict
-from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Union, Any, Sequence, Generic, TypeVar
+from typing import Optional, Any, Sequence, TypeVar
 
 import scalecodec.types
 from scalecodec import ScaleBytes

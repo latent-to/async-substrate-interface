@@ -62,7 +62,7 @@ async def test_get_events_proper_decoding():
     print("Testing test_get_events_proper_decoding")
     substrate = await get_mock_substrate("test_get_events_proper_decoding")
     # known block/hash pair that has the events we seek to decode
-    block = 7959635
+    block = 7959635  # noqa
     block_hash = "0x81617dc8ede17528d8f8aab64c84285a166f73e120ff6d2acd11e3419a95abec"
     all_events = await substrate.get_events(block_hash=block_hash)
     event = all_events[1]

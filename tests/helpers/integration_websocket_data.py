@@ -2,8 +2,6 @@
 # stubbing the network I/O only
 # This is basically a JSON file, but is not a JSON file because of the discrepancies between JSON and Python types
 
-from itertools import cycle
-
 
 WEBSOCKET_RESPONSES = {
     "test_bits": {

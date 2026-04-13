@@ -111,9 +111,9 @@ def main(seed: str, method: Callable[[SubstrateInterface], Any]):
     upcoming_metadata = False
     upcoming_metadataV15 = False
 
-    for l in all_ws_data:
-        if l.startswith("WEBSOCKET_SEND> "):
-            data = json.loads(l[len("WEBSOCKET_SEND> ") :])
+    for line in all_ws_data:
+        if line.startswith("WEBSOCKET_SEND> "):
+            data = json.loads(line[len("WEBSOCKET_SEND> ") :])
             del data["jsonrpc"]
             del data["id"]
             send_method = data["method"]
@@ -131,8 +131,8 @@ def main(seed: str, method: Callable[[SubstrateInterface], Any]):
                 output_dict_at_seed[send_method][send_params] = {}
             else:
                 output_dict_at_seed[send_method] = {send_params: {}}
-        elif l.startswith("WEBSOCKET_RECEIVE> "):
-            data = json.loads(l[len("WEBSOCKET_RECEIVE> ") :])
+        elif line.startswith("WEBSOCKET_RECEIVE> "):
+            data = json.loads(line[len("WEBSOCKET_RECEIVE> ") :])
             if upcoming_metadata:
                 upcoming_metadata = False
                 metadata = data["result"]
@@ -147,7 +147,7 @@ def main(seed: str, method: Callable[[SubstrateInterface], Any]):
                 output_dict_at_seed[send_method][send_params] = data
             except (NameError, KeyError):
                 raise KeyError(
-                    f"Attempting to add a received value before its keys have been added: {l}"
+                    f"Attempting to add a received value before its keys have been added: {line}"
                 )
 
     with open(OUTPUT_DIR, "w+") as f:

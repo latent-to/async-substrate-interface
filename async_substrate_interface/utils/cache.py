@@ -483,7 +483,7 @@ class CachedFetcher:
             self._cache.set(key, result)
             future.set_result(result)
             return result
-        except Exception as e:
+        except Exception:
             self._inflight.pop(key, None)
             future.cancel()
             raise
