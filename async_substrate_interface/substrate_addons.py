@@ -106,6 +106,7 @@ class RetrySyncSubstrate(SubstrateInterface):
     def __init__(
         self,
         url: str,
+        *,
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
@@ -251,6 +252,7 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
     def __init__(
         self,
         url: str,
+        *,
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
