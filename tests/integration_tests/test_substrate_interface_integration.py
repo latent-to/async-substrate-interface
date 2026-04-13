@@ -1,11 +1,11 @@
 import bittensor_wallet
 import pytest
-from scalecodec import ss58_encode
 
 from async_substrate_interface.sync_substrate import (
     SubstrateInterface,
     ExtrinsicReceipt,
 )
+from tests.helpers.fixtures import FakeWebsocket
 from tests.helpers.settings import ARCHIVE_ENTRYPOINT
 
 
@@ -29,6 +29,15 @@ async def substrate():
         yield _sub
     finally:
         _sub.close()
+
+
+def get_mock_substrate(seed: str):
+    sub = SubstrateInterface(
+        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor", _mock=True
+    )
+    sub.ws = FakeWebsocket(seed=seed)
+    sub.initialize()
+    return sub
 
 
 def test_legacy_decoding(substrate):
@@ -57,8 +66,9 @@ def test_legacy_decoding(substrate):
     print("test_legacy_decoding succeeded")
 
 
-def test_ss58_conversion(substrate):
+def test_ss58_conversion():
     print("Testing test_ss58_conversion")
+    substrate = get_mock_substrate("test_ss58_conversion")
     block_hash = substrate.get_chain_finalised_head()
     qm = substrate.query_map(
         "SubtensorModule",
@@ -709,7 +719,8 @@ def test_old_runtime_calls_natively(substrate):
     ]
 
 
-def test_bits(substrate):
+def test_bits():
+    substrate = get_mock_substrate("test_bits")
     current_sqrt_price = substrate.query(
         module="Swap",
         storage_function="AlphaSqrtPrice",

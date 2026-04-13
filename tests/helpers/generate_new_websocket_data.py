@@ -40,6 +40,7 @@ Notes:
 """
 
 import os
+from typing import Any, Callable
 
 # Not really necessary, but doesn't hurt to have
 os.environ["SUBSTRATE_CACHE_METHOD_SIZE"] = "0"
@@ -55,7 +56,7 @@ from async_substrate_interface.sync_substrate import (
     SubstrateInterface,
 )
 
-from .settings import ARCHIVE_ENTRYPOINT
+from tests.helpers.settings import ARCHIVE_ENTRYPOINT
 
 
 RAW_WS_LOG = "/tmp/bittensor-raw-ws.log"
@@ -65,7 +66,7 @@ OUTPUT_METADATA_V15 = "/tmp/integration_websocket_at_version.txt"
 INTEGRATION_WS_DATA = pathlib.Path(__file__).parent / "integration_websocket_data.py"
 
 
-def main(seed: str, method: str, *args, **kwargs):
+def main(seed: str, method: Callable[[SubstrateInterface], Any]):
     """
     Runs the given method on Subtensor, processes the websocket data that occurred during that method's execution,
     attaches it with the "seed" arg as a key to a new tmp file ("/tmp/bittensor-ws-output.txt")
@@ -93,9 +94,7 @@ def main(seed: str, method: str, *args, **kwargs):
         ss58_format=42,
         _log_raw_websockets=True,
     )
-
-    executor = getattr(substrate, method)
-    result = executor(*args, **kwargs)
+    result = method(substrate)
     print(result)
 
     substrate.close()
@@ -179,11 +178,24 @@ def main(seed: str, method: str, *args, **kwargs):
             watching = True
             start_idx = line_idx
     if start_idx == 0 or end_idx == 0:
-        print(
-            f"Unable to find seed {seed} in current `websocket_integration_data.py` file. You should manually add this"
-            f"new seed key."
-        )
-        return
+        if start_idx == 0:
+            last_entry = None
+            # new seed key, should be appended to the bottom
+            for line_idx, line in enumerate(all_integration_ws_data):
+                # because this is is a loop, it will replace til the end of the file
+                if line == "    },\n":
+                    last_entry = line_idx
+            if last_entry is not None:
+                insertion_point = last_entry + 1
+                all_integration_ws_data.insert(insertion_point, "")
+                start_idx = insertion_point
+                end_idx = insertion_point
+        else:
+            print(
+                f"Unable to find seed {seed} in current `websocket_integration_data.py` file. You should manually add this"
+                f" new seed key."
+            )
+            return
     # only retain the portions of the file before and after the seed we want to update
     first_part = all_integration_ws_data[:start_idx]
     last_part = all_integration_ws_data[end_idx + 1 :]
@@ -210,32 +222,12 @@ def main(seed: str, method: str, *args, **kwargs):
 
 if __name__ == "__main__":
     # Example usage
-    # main("subnetwork_n", "subnetwork_n", 1)
-    # main("get_all_subnets_info", "get_all_subnets_info")
-    # main("metagraph", "metagraph", 1)
-    # main(
-    #     "get_netuids_for_hotkey",
-    #     "get_netuids_for_hotkey",
-    #     "5Cf4LPRv6tiyuFsfLRQaFYEEn3zJRGi4bAE9DwbbKmbCSHpV",
-    # )
-    # main("get_current_block", "get_current_block")
-    # main(
-    #     "is_hotkey_registered_on_subnet",
-    #     "is_hotkey_registered_on_subnet",
-    #     "5Cf4LPRv6tiyuFsfLRQaFYEEn3zJRGi4bAE9DwbbKmbCSHpV",
-    #     14,
-    # )
-    # main(
-    #     "is_hotkey_registered",
-    #     "is_hotkey_registered",
-    #     "5Cf4LPRv6tiyuFsfLRQaFYEEn3zJRGi4bAE9DwbbKmbCSHpV",
-    # )
-    # main("blocks_since_last_update", "blocks_since_last_update", 1, 0)
-    # main("get_block_hash", "get_block_hash", 6522038)
-    # main(
-    #     "get_neuron_for_pubkey_and_subnet",
-    #     "get_neuron_for_pubkey_and_subnet",
-    #     "5Cf4LPRv6tiyuFsfLRQaFYEEn3zJRGi4bAE9DwbbKmbCSHpV",
-    #     14,
-    # )
-    main("metagraph", "metagraph", 1)
+    def fn_(substrate: SubstrateInterface) -> Any:
+        block_hash = substrate.get_chain_finalised_head()
+        qm = substrate.query_map(
+            "SubtensorModule",
+            "OwnedHotkeys",
+            block_hash=block_hash,
+        )
+
+    main("test_ss58_conversion", fn_)
