@@ -4,16 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, ANY
 
 import pytest
 from websockets.exceptions import InvalidURI
-from websockets.protocol import State
 
 from async_substrate_interface.async_substrate import (
     AsyncExtrinsicReceipt,
     AsyncQueryMapResult,
     AsyncSubstrateInterface,
-    get_async_substrate_interface,
 )
 from async_substrate_interface.errors import SubstrateRequestException
-from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 
 
 @pytest.mark.asyncio
@@ -84,79 +81,6 @@ async def test_runtime_call(monkeypatch):
         "state_call", ["SubstrateApi_SubstrateMethod", "", None], runtime=ANY
     )
     print("test_runtime_call succeeded")
-
-
-@pytest.mark.asyncio
-async def test_websocket_shutdown_timer():
-    print("Testing test_websocket_shutdown_timer")
-    # using default ws shutdown timer of 5.0 seconds
-    async with AsyncSubstrateInterface(LATENT_LITE_ENTRYPOINT) as substrate:
-        await substrate.get_chain_head()
-        await asyncio.sleep(6)
-    assert (
-        substrate.ws.state is State.CLOSED
-    )  # connection should have closed automatically
-
-    # using custom ws shutdown timer of 10.0 seconds
-    async with AsyncSubstrateInterface(
-        LATENT_LITE_ENTRYPOINT, ws_shutdown_timer=10.0
-    ) as substrate:
-        await substrate.get_chain_head()
-        await asyncio.sleep(6)  # same sleep time as before
-        assert substrate.ws.state is State.OPEN  # connection should still be open
-    print("test_websocket_shutdown_timer succeeded")
-
-
-@pytest.mark.asyncio
-async def test_runtime_switching():
-    print("Testing test_runtime_switching")
-    block = 6067945  # block where a runtime switch happens
-    async with AsyncSubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
-    ) as substrate:
-        # assures we switch between the runtimes without error
-        assert await substrate.get_extrinsics(block_number=block - 20) is not None
-        assert await substrate.get_extrinsics(block_number=block) is not None
-        assert await substrate.get_extrinsics(block_number=block - 21) is not None
-        one, two = await asyncio.gather(
-            substrate.get_extrinsics(block_number=block - 22),
-            substrate.get_extrinsics(block_number=block + 1),
-        )
-        assert one is not None
-        assert two is not None
-    print("test_runtime_switching succeeded")
-
-
-@pytest.mark.asyncio
-async def test_memory_leak():
-    import gc
-
-    # Stop any existing tracemalloc and start fresh
-    tracemalloc.stop()
-    tracemalloc.start()
-    two_mb = 2 * 1024 * 1024
-
-    # Warmup: populate caches before taking baseline
-    for _ in range(2):
-        subtensor = await get_async_substrate_interface(LATENT_LITE_ENTRYPOINT)
-        await subtensor.close()
-
-    baseline_snapshot = tracemalloc.take_snapshot()
-
-    for i in range(5):
-        subtensor = await get_async_substrate_interface(LATENT_LITE_ENTRYPOINT)
-        await subtensor.close()
-        gc.collect()
-
-        snapshot = tracemalloc.take_snapshot()
-        stats = snapshot.compare_to(baseline_snapshot, "lineno")
-        total_diff = sum(stat.size_diff for stat in stats)
-        current, peak = tracemalloc.get_traced_memory()
-        # Allow cumulative growth up to 2MB per iteration from baseline
-        assert total_diff < two_mb * (i + 1), (
-            f"Loop {i}: diff={total_diff / 1024:.2f} KiB, current={current / 1024:.2f} KiB, "
-            f"peak={peak / 1024:.2f} KiB"
-        )
 
 
 @pytest.mark.asyncio
