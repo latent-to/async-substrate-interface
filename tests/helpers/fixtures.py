@@ -69,7 +69,7 @@ class FakeWebsocket(ClientConnection):
             response["jsonrpc"] = "2.0"
             return json.dumps(response)
         except (KeyError, TypeError):
-            print("ERROR", self.seed, item["method"], item["params"])
+            print("ERROR", self.seed, item["method"], item["params"], type(item["params"]))
             raise
 
     def close(self, *args, **kwargs):

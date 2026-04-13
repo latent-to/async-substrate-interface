@@ -223,11 +223,16 @@ def main(seed: str, method: Callable[[SubstrateInterface], Any]):
 if __name__ == "__main__":
     # Example usage
     def fn_(substrate: SubstrateInterface) -> Any:
-        block_hash = substrate.get_chain_finalised_head()
-        qm = substrate.query_map(
-            "SubtensorModule",
-            "OwnedHotkeys",
-            block_hash=block_hash,
-        )
+        block = 7959635
+        block_hash = substrate.get_block_hash(block)
+        print(block_hash)
+        all_events = substrate.get_events(block_hash=block_hash)
+        event = all_events[1]
+        print(event)
+        # assert event["attributes"] == (
+        #     "5G1NjW9YhXLadMWajvTkfcJy6up3yH2q1YzMXDTi6ijanChe",
+        #     30,
+        #     "0xa6b4e5c8241d60ece0c25056b19f7d21ae845269fc771ad46bf3e011865129a5",
+        # )
 
-    main("test_ss58_conversion", fn_)
+    main("test_get_events_proper_decoding", fn_)
