@@ -472,6 +472,7 @@ class SubstrateInterface(SubstrateMixin):
     def __init__(
         self,
         url: str,
+        *,
         use_remote_preset: bool = False,
         auto_discover: bool = True,
         ss58_format: Optional[int] = None,
