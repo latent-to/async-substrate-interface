@@ -271,6 +271,7 @@ class Runtime:
         self.metadata = metadata
         self.metadata_v15 = metadata_v15
         self.runtime_info = runtime_info
+        self.type_registry_preset: Optional[str] = None
         runtime_info = runtime_info or {}
         self.runtime_version = runtime_info.get("specVersion")
         self.transaction_version = runtime_info.get("transactionVersion")
@@ -366,6 +367,8 @@ class Runtime:
         """
         Returns True if current runtime implements a `PortableRegistry` (`MetadataV14` and higher)
         """
+        if self.metadata is None:
+            return False
         return self.metadata.portable_registry is not None
 
     def __str__(self):
