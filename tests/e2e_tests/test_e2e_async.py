@@ -748,22 +748,19 @@ async def test_websocket_shutdown_timer():
 
 
 @pytest.mark.asyncio
-async def test_runtime_switching():
+async def test_runtime_switching(substrate):
     print("Testing test_runtime_switching")
     block = 6067945  # block where a runtime switch happens
-    async with AsyncSubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
-    ) as substrate:
-        # assures we switch between the runtimes without error
-        assert await substrate.get_extrinsics(block_number=block - 20) is not None
-        assert await substrate.get_extrinsics(block_number=block) is not None
-        assert await substrate.get_extrinsics(block_number=block - 21) is not None
-        one, two = await asyncio.gather(
-            substrate.get_extrinsics(block_number=block - 22),
-            substrate.get_extrinsics(block_number=block + 1),
-        )
-        assert one is not None
-        assert two is not None
+    # assures we switch between the runtimes without error
+    assert await substrate.get_extrinsics(block_number=block - 20) is not None
+    assert await substrate.get_extrinsics(block_number=block) is not None
+    assert await substrate.get_extrinsics(block_number=block - 21) is not None
+    one, two = await asyncio.gather(
+        substrate.get_extrinsics(block_number=block - 22),
+        substrate.get_extrinsics(block_number=block + 1),
+    )
+    assert one is not None
+    assert two is not None
     print("test_runtime_switching succeeded")
 
 

@@ -617,16 +617,13 @@ def test_old_runtime_calls_natively(substrate):
     ]
 
 
-def test_runtime_switching():
+def test_runtime_switching(substrate):
     print("Testing test_runtime_switching")
     block = 6067945  # block where a runtime switch happens
-    with SubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
-    ) as substrate:
-        # assures we switch between the runtimes without error
-        assert substrate.get_extrinsics(block_number=block - 20) is not None
-        assert substrate.get_extrinsics(block_number=block) is not None
-        assert substrate.get_extrinsics(block_number=block - 21) is not None
+    # assures we switch between the runtimes without error
+    assert substrate.get_extrinsics(block_number=block - 20) is not None
+    assert substrate.get_extrinsics(block_number=block) is not None
+    assert substrate.get_extrinsics(block_number=block - 21) is not None
     print("test_runtime_switching succeeded")
 
 
