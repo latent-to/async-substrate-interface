@@ -1463,6 +1463,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             if runtime is None:
                 runtime = await self.init_runtime(block_hash=block_hash)
             obj = scale_decode(type_string, scale_bytes, runtime=runtime)
+            if getattr(obj, "value") is None:
+                return None
             return obj
 
     async def init_runtime(
@@ -2530,7 +2532,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
         runtime: Optional[Runtime] = None,
-        force_legacy_decode: bool = False,
     ) -> tuple[Any, bool]:
         """
         Processes the RPC call response by decoding it, returning it as is, or setting a handler for subscriptions,
@@ -2543,12 +2544,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
             storage_item: The ScaleType object used for decoding ScaleBytes results
             result_handler: the result handler coroutine used for handling longer-running subscriptions
             runtime: Optional Runtime to use for decoding. If not specified, the currently-loaded `self.runtime` is used
-            force_legacy_decode: Whether to force the use of the legacy Metadata V14 decoder
 
         Returns:
              (decoded response, completion)
         """
-        result: dict | ScaleType = response
+        result: Optional[dict | ScaleType] = response
         if value_scale_type and isinstance(storage_item, ScaleType):
             if (response_result := response.get("result")) is not None:
                 query_value = response_result
@@ -2566,7 +2566,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
             else:
                 q = query_value
             decoded = await self.decode_scale(value_scale_type, q, runtime=runtime)
-            assert decoded is not None
             result = decoded
         if asyncio.iscoroutinefunction(result_handler):
             # For multipart responses as a result of subscriptions.
@@ -2580,9 +2579,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         value_scale_type: Optional[str] = None,
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
-        attempt: int = 1,
         runtime: Optional[Runtime] = None,
-        force_legacy_decode: bool = False,
     ) -> RequestResults:
         request_manager = RequestManager(payloads)
 
@@ -2639,7 +2636,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
                                 storage_item,
                                 result_handler,
                                 runtime=runtime,
-                                force_legacy_decode=force_legacy_decode,
                             )
                             request_manager.add_response(
                                 item_id, decoded_response, complete

@@ -707,6 +707,8 @@ class SubstrateInterface(SubstrateMixin):
         else:
             assert self.runtime is not None
             obj = scale_decode(type_string, scale_bytes, runtime=self.runtime)
+            if getattr(obj, "value") is None:
+                return None
             return obj
 
     def load_runtime(self, runtime):
@@ -1719,7 +1721,7 @@ class SubstrateInterface(SubstrateMixin):
         Returns:
              (decoded response, completion)
         """
-        result: dict | ScaleType = response
+        result: Optional[dict | ScaleType] = response
         if value_scale_type and isinstance(storage_item, ScaleType):
             if (response_result := response.get("result")) is not None:
                 query_value = response_result
@@ -1737,7 +1739,6 @@ class SubstrateInterface(SubstrateMixin):
             else:
                 q = query_value
             decoded = self.decode_scale(value_scale_type, q)
-            assert decoded is not None
             result = decoded
         if callable(result_handler):
             # For multipart responses as a result of subscriptions.
