@@ -689,7 +689,7 @@ class SubstrateInterface(SubstrateMixin):
         self,
         type_string: str,
         scale_bytes: bytes,
-    ) -> Optional[ScaleType]:
+    ) -> ScaleType[Any]:
         """
         Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given RUST type_string
         (e.g. BlockNumber). The relevant versioning information of the type (if defined) will be applied if block_hash
@@ -702,14 +702,9 @@ class SubstrateInterface(SubstrateMixin):
         Returns:
             ScaleType object
         """
-        if scale_bytes == b"":
-            return None
-        else:
-            assert self.runtime is not None
-            obj = scale_decode(type_string, scale_bytes, runtime=self.runtime)
-            if getattr(obj, "value") is None:
-                return None
-            return obj
+        assert self.runtime is not None
+        obj = scale_decode(type_string, scale_bytes, runtime=self.runtime)
+        return obj
 
     def load_runtime(self, runtime):
         self.runtime = runtime
@@ -942,7 +937,6 @@ class SubstrateInterface(SubstrateMixin):
                         type_string=change_scale_type,
                         scale_bytes=hex_to_bytes(change_data),
                     )
-                    assert decoded is not None
                     updated_obj = decoded.value
 
                     subscription_result = subscription_handler(
@@ -2434,7 +2428,6 @@ class SubstrateInterface(SubstrateMixin):
         )
         result_vec_u8_bytes = hex_to_bytes(result_data["result"])
         _decoded = self.decode_scale("Vec<u8>", result_vec_u8_bytes)
-        assert _decoded is not None
         result_bytes = _decoded.value
 
         # Decode result
@@ -2520,7 +2513,7 @@ class SubstrateInterface(SubstrateMixin):
         result_bytes = hex_to_bytes(result_data["result"])
         obj = self.decode_scale(output_type_string, result_bytes)
         # protect against `None`s from decode_scale
-        return getattr(obj, "value", obj)
+        return obj.value
 
     def get_account_nonce(self, account_address: str) -> int:
         """

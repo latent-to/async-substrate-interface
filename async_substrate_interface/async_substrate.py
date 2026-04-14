@@ -1441,9 +1441,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
         scale_bytes: bytes,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> Optional[ScaleType[Any]]:
+    ) -> ScaleType[Any]:
         """
-        Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given RUST type_string
+        Helper function to decode arbitrary SCALE-bytes (e.g. 0x02000000) according to given type_string
         (e.g. BlockNumber). The relevant versioning information of the type (if defined) will be applied if block_hash
         is set
 
@@ -1457,15 +1457,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Returns:
             ScaleType object
         """
-        if scale_bytes == b"":
-            return None
-        else:
-            if runtime is None:
-                runtime = await self.init_runtime(block_hash=block_hash)
-            obj = scale_decode(type_string, scale_bytes, runtime=runtime)
-            if getattr(obj, "value") is None:
-                return None
-            return obj
+        if runtime is None:
+            runtime = await self.init_runtime(block_hash=block_hash)
+        obj = scale_decode(type_string, scale_bytes, runtime=runtime)
+        return obj
 
     async def init_runtime(
         self,
@@ -1692,7 +1687,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
                         scale_bytes=hex_to_bytes(change_data),
                         runtime=runtime,
                     )
-                    assert updated_obj is not None
 
                     subscription_result = await subscription_handler(
                         storage_key, updated_obj.value, subscription_id
@@ -2548,7 +2542,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         Returns:
              (decoded response, completion)
         """
-        result: Optional[dict | ScaleType] = response
+        result: dict | ScaleType = response
         if value_scale_type and isinstance(storage_item, ScaleType):
             if (response_result := response.get("result")) is not None:
                 query_value = response_result
@@ -3322,7 +3316,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         _decoded = await self.decode_scale(
             "Vec<u8>", result_vec_u8_bytes, runtime=runtime
         )
-        assert _decoded is not None
         result_bytes = _decoded.value
 
         # TODO check to see if we can use the bytes from the ScaleType rather than using the value
@@ -3418,8 +3411,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # Decode result
         result_bytes = hex_to_bytes(result_data["result"])
         obj = await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
-        # protect against `None`s from decode_scale
-        return getattr(obj, "value", obj)
+        return obj.value
 
     async def get_account_nonce(self, account_address: str) -> int:
         """
