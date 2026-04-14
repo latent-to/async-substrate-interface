@@ -3695,7 +3695,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
         runtime: Optional[Runtime] = None,
-    ) -> Optional[ScaleType[Any]]:
+    ) -> ScaleType[Any]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
         you should use `self.query_multiple`

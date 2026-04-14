@@ -2763,7 +2763,7 @@ class SubstrateInterface(SubstrateMixin):
         block_hash: Optional[str] = None,
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
-    ) -> Optional[ScaleType[Any]]:
+    ) -> ScaleType[Any]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
         you should use ``self.query_multiple``
