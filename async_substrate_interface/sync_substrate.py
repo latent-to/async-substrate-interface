@@ -3,11 +3,11 @@ import logging
 import os
 import socket
 from hashlib import blake2b
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, cast
 from unittest.mock import MagicMock
 
 import scalecodec
-from scalecodec import ScaleBytes
+from scalecodec import ScaleBytes, ScaleValue
 from scalecodec.base import ScaleType
 from scalecodec.types import (
     GenericCall,
@@ -374,7 +374,7 @@ class ExtrinsicReceipt:
 class QueryMapResult:
     def __init__(
         self,
-        records: list,
+        records: list[tuple[ScaleValue, ScaleValue]],
         page_size: int,
         substrate: "SubstrateInterface",
         module: Optional[str] = None,
@@ -418,7 +418,7 @@ class QueryMapResult:
         self.last_key = result.last_key
         return result.records
 
-    def retrieve_all_records(self) -> list[Any]:
+    def retrieve_all_records(self) -> list[tuple[ScaleValue, ScaleValue]]:
         """
         Retrieves all records from all subsequent pages for the QueryMapResult,
         returning them as a list.
@@ -551,14 +551,15 @@ class SubstrateInterface(SubstrateMixin):
         if not self.initialized:
             if not self._chain:
                 chain = self.rpc_request("system_chain", [])
-                self._chain = chain.get("result")
+                self._chain = chain.get("result", "")
             self.init_runtime()
             if self.ss58_format is None:
                 # Check and apply runtime constants
                 ss58_prefix_constant = self.get_constant(
                     "System", "SS58Prefix", block_hash=self.last_block_hash
                 )
-                if ss58_prefix_constant:
+                if ss58_prefix_constant is not None:
+                    assert isinstance(ss58_prefix_constant.value, int)
                     self.ss58_format = ss58_prefix_constant.value
                     self.runtime.ss58_format = ss58_prefix_constant.value
                     self.runtime.runtime_config.ss58_format = ss58_prefix_constant.value
@@ -655,7 +656,10 @@ class SubstrateInterface(SubstrateMixin):
             else:
                 raise e
         metadata_option_hex_str = metadata_rpc_result["result"]
-        metadata_option_bytes = bytes.fromhex(metadata_option_hex_str[2:])
+        assert isinstance(metadata_option_hex_str, str)
+        metadata_option_bytes = bytes.fromhex(
+            metadata_option_hex_str.removeprefix("0x")
+        )
         inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
         if inner_bytes is None:
             return None
@@ -664,7 +668,7 @@ class SubstrateInterface(SubstrateMixin):
     def encode_scale(
         self,
         type_string,
-        value: Any,
+        value: ScaleValue,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
     ) -> bytes:
@@ -1520,7 +1524,7 @@ class SubstrateInterface(SubstrateMixin):
             block_hash=block_hash,
         )
         assert events is not None
-        return events.value
+        return cast(list[dict], events.value)
 
     def get_metadata(self, block_hash=None):
         """
@@ -1543,7 +1547,7 @@ class SubstrateInterface(SubstrateMixin):
 
         if block_header["result"] is None:
             raise SubstrateRequestException(f'Block not found for "{block_hash}"')
-        parent_block_hash: str = block_header["result"]["parentHash"]
+        parent_block_hash = block_header["result"]["parentHash"]
 
         if int(parent_block_hash, 16) == 0:
             # "0x0000000000000000000000000000000000000000000000000000000000000000"
@@ -1568,12 +1572,8 @@ class SubstrateInterface(SubstrateMixin):
         else:
             response = self.rpc_request("state_getStorage", [storage_key, block_hash])
 
-        if "result" in response:
-            return response.get("result")
-        else:
-            raise SubstrateRequestException(
-                "Unknown error occurred during retrieval of events"
-            )
+        assert isinstance(response, dict)
+        return response.get("result")
 
     @functools.lru_cache(maxsize=SUBSTRATE_RUNTIME_CACHE_SIZE)
     def get_block_runtime_info(self, block_hash: str) -> dict:
@@ -1581,7 +1581,7 @@ class SubstrateInterface(SubstrateMixin):
         Retrieve the runtime info of given block_hash
         """
         response = self.rpc_request("state_getRuntimeVersion", [block_hash])
-        return response.get("result")
+        return response["result"]
 
     get_block_runtime_version = get_block_runtime_info
 
@@ -1698,7 +1698,6 @@ class SubstrateInterface(SubstrateMixin):
         value_scale_type: Optional[str] = None,
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
-        force_legacy_decode: bool = False,
     ) -> tuple[Any, bool]:
         """
         Processes the RPC call response by decoding it, returning it as is, or setting a handler for subscriptions,
@@ -1710,7 +1709,6 @@ class SubstrateInterface(SubstrateMixin):
             value_scale_type: Scale Type string used for decoding ScaleBytes results
             storage_item: The ScaleType object used for decoding ScaleBytes results
             result_handler: the result handler coroutine used for handling longer-running subscriptions
-            force_legacy_decode: Whether to force legacy Metadata V14 decoding of the response
 
         Returns:
              (decoded response, completion)
@@ -1747,7 +1745,6 @@ class SubstrateInterface(SubstrateMixin):
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
         attempt: int = 1,
-        force_legacy_decode: bool = False,
     ) -> RequestResults:
         request_manager = RequestManager(payloads)
         _received = {}
@@ -1793,7 +1790,6 @@ class SubstrateInterface(SubstrateMixin):
                         storage_item,
                         result_handler,
                         attempt + 1,
-                        force_legacy_decode,
                     )
             if "id" in response:
                 _received[response["id"]] = response
@@ -1813,18 +1809,17 @@ class SubstrateInterface(SubstrateMixin):
                                 )
                                 subscription_added = True
                             except KeyError:
-                                raise SubstrateRequestException(str(response))
                                 logger.error(
                                     f"Error received from subtensor for {item_id}: {response}\n"
                                     f"Currently received responses: {request_manager.get_results()}"
                                 )
+                                raise SubstrateRequestException(str(response))
                         decoded_response, complete = self._process_response(
                             response,
                             item_id,
                             value_scale_type,
                             storage_item,
                             result_handler,
-                            force_legacy_decode,
                         )
                         request_manager.add_response(
                             item_id, decoded_response, complete
@@ -1870,7 +1865,7 @@ class SubstrateInterface(SubstrateMixin):
         params: Optional[list],
         result_handler: Optional[Callable] = None,
         block_hash: Optional[str] = None,
-    ) -> Any:
+    ) -> dict[str, Any]:
         """
         Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
         `self.query_map` do not meet your needs.
@@ -1912,8 +1907,10 @@ class SubstrateInterface(SubstrateMixin):
                 raise StateDiscardedError(bh)
             else:
                 raise SubstrateRequestException(err_msg)
-        if "result" in result[payload_id][0]:
-            return result[payload_id][0]
+        response = result[payload_id][0]
+        assert isinstance(response, dict)
+        if "result" in response:
+            return response
         else:
             raise SubstrateRequestException(result[payload_id][0])
 
@@ -2021,7 +2018,7 @@ class SubstrateInterface(SubstrateMixin):
 
     def query_multi(
         self, storage_keys: list[StorageKey], block_hash: Optional[str] = None
-    ) -> list[tuple[StorageKey, Any]]:
+    ) -> list[tuple[StorageKey, ScaleValue]]:
         """
         Query multiple storage keys in one request.
 
@@ -2402,14 +2399,14 @@ class SubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
-    ) -> Any:
+    ) -> ScaleValue:
         logger.debug(
             f"Decoding old runtime call: {api}.{method} with params: {params} at block hash: {block_hash}"
         )
         runtime_call_def = _TYPE_REGISTRY["runtime_api"][api]["methods"][method]
 
         # Encode params
-        param_data: ScaleBytes | bytes = b""
+        param_data: ScaleBytes | bytes
 
         runtime = self.init_runtime(block_hash=block_hash)
 
@@ -2445,7 +2442,7 @@ class SubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
-    ) -> Any:
+    ) -> ScaleValue:
         """
         Calls a runtime API method
 
@@ -2526,15 +2523,16 @@ class SubstrateInterface(SubstrateMixin):
             Nonce for given account address
         """
         if self.supports_rpc_method("state_call"):
-            nonce_obj = self.runtime_call(
+            nonce = self.runtime_call(
                 "AccountNonceApi", "account_nonce", [account_address]
             )
-            return getattr(nonce_obj, "value", nonce_obj)
+            assert isinstance(nonce, int)
+            return nonce
         else:
             response = self.query(
                 module="System", storage_function="Account", params=[account_address]
             )
-            assert response is not None
+            assert isinstance(response.value, dict)
             return response["nonce"]
 
     def get_account_next_index(self, account_address: str) -> int:
@@ -2592,7 +2590,7 @@ class SubstrateInterface(SubstrateMixin):
         module_name: str,
         constant_name: str,
         block_hash: Optional[str] = None,
-    ) -> Optional[ScaleType]:
+    ) -> Optional[ScaleType[ScaleValue]]:
         """
         Returns the decoded `ScaleType` object of the constant for given module name, call function name and block_hash
         (or chaintip if block_hash is omitted)
@@ -2668,7 +2666,7 @@ class SubstrateInterface(SubstrateMixin):
         result = self.runtime_call(
             "TransactionPaymentApi", "query_info", [extrinsic, extrinsic_len]
         )
-
+        assert isinstance(result, dict)
         return result
 
     def get_type_registry(
@@ -2884,7 +2882,7 @@ class SubstrateInterface(SubstrateMixin):
             params=[prefix, page_size, start_key, block_hash],
         )
 
-        result_keys = response.get("result")
+        result_keys = response.get("result", [])
 
         result = []
         last_key = None
@@ -2957,21 +2955,20 @@ class SubstrateInterface(SubstrateMixin):
             max_weight = payment_info["weight"]
 
         # Check if call has existing approvals
-        multisig_details = self.query(
+        multisig_details_ = self.query(
             "Multisig", "Multisigs", [multisig_account.value, call.call_hash]
         )
-        assert multisig_details is not None
-
-        if multisig_details.value:
-            maybe_timepoint = multisig_details.value["when"]
+        multisig_details = multisig_details_.value
+        assert isinstance(multisig_details, dict)
+        if multisig_details:
+            maybe_timepoint = multisig_details["when"]
         else:
             maybe_timepoint = None
 
         # Compose 'as_multi' when final, 'approve_as_multi' otherwise
         if (
-            multisig_details.value
-            and len(multisig_details.value["approvals"]) + 1
-            == multisig_account.threshold
+            multisig_details
+            and len(multisig_details["approvals"]) + 1 == multisig_account.threshold
         ):
             multi_sig_call = self.compose_call(
                 "Multisig",

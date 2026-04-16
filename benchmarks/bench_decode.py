@@ -53,8 +53,12 @@ print(f"scalecodec: {scalecodec.__file__}", flush=True)
 def _init_cyscale(metadata_hex: str, ss58_format: int = 42):
     """Initialize RuntimeConfigurationObject with portable registry."""
     rc = RuntimeConfigurationObject()
-    rc.update_type_registry(load_type_registry_preset("core"))
-    rc.update_type_registry(load_type_registry_preset("legacy"))
+    core_preset = load_type_registry_preset("core")
+    assert core_preset is not None
+    rc.update_type_registry(core_preset)
+    legacy_preset = load_type_registry_preset("legacy")
+    assert legacy_preset is not None
+    rc.update_type_registry(legacy_preset)
     meta = rc.create_scale_object("MetadataVersioned", ScaleBytes(metadata_hex))
     meta.decode()
     rc.add_portable_registry(meta)

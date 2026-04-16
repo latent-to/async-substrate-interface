@@ -2123,7 +2123,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash = await self.get_block_hash(block_number)
 
             if block_hash is None:
-                return
+                return None
 
         if block_hash and finalized_only:
             raise ValueError(
@@ -3840,7 +3840,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 method="state_getKeys", params=[prefix, block_hash], runtime=runtime
             )
 
-        result_keys = response["result"]
+        result_keys = response.get("result", [])
 
         result = []
         last_key = None
@@ -3966,8 +3966,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
         multisig_details_ = await self.query(
             "Multisig", "Multisigs", [multisig_account.value, call.call_hash]
         )
-        assert multisig_details_ is not None
-        multisig_details = getattr(multisig_details_, "value", multisig_details_)
+        multisig_details = multisig_details_.value
+        assert isinstance(multisig_details, dict)
         if multisig_details:
             maybe_timepoint = multisig_details["when"]
         else:
@@ -3976,8 +3976,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # Compose 'as_multi' when final, 'approve_as_multi' otherwise
         if (
             multisig_details
-            and len(multisig_details["approvals"]) + 1
-            == multisig_account.threshold
+            and len(multisig_details["approvals"]) + 1 == multisig_account.threshold
         ):
             multi_sig_call = await self.compose_call(
                 "Multisig",
@@ -4325,6 +4324,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 return (
                     r if (r := await result_handler(block_data)) is not None else True
                 )
+            return None
 
         args = inspect.getfullargspec(result_handler).args
         if len(args) != 1:
