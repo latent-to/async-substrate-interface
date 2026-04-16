@@ -4369,16 +4369,17 @@ class DiskCachedAsyncSubstrateInterface(AsyncSubstrateInterface):
         super().__init__(url, *args, _ssl_context=ssl_context, **kwargs)  # type: ignore[misc]
 
     async def initialize(self) -> None:
-        db = AsyncSqliteDB(self.url)
-        cached = await db.load_dns_cache(self.url)
-        if cached is not None:
-            addrinfos, saved_at_unix = cached
-            age = time.time() - saved_at_unix
-            # Reconstruct a monotonic timestamp so _resolve_host's TTL check works correctly
-            self.ws._dns_cache = (addrinfos, time.monotonic() - age)
-            logger.debug(f"Loaded DNS cache from disk (age={age:.0f}s)")
-        await self.runtime_cache.load_from_disk(self.url)
-        await self._initialize()
+        if not self.initialized:
+            db = AsyncSqliteDB(self.url)
+            cached = await db.load_dns_cache(self.url)
+            if cached is not None:
+                addrinfos, saved_at_unix = cached
+                age = time.time() - saved_at_unix
+                # Reconstruct a monotonic timestamp so _resolve_host's TTL check works correctly
+                self.ws._dns_cache = (addrinfos, time.monotonic() - age)
+                logger.debug(f"Loaded DNS cache from disk (age={age:.0f}s)")
+            await self.runtime_cache.load_from_disk(self.url)
+            await self._initialize()
 
     async def close(self):
         """
