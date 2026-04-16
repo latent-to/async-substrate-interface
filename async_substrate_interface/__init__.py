@@ -1,5 +1,7 @@
 # ruff: noqa: E402
 
+import importlib.metadata
+
 
 def _check_conflicts():
     """
@@ -23,7 +25,6 @@ def _check_conflicts():
 _check_conflicts()
 
 
-import importlib.metadata
 from .async_substrate import (
     AsyncQueryMapResult,
     AsyncSubstrateInterface,
