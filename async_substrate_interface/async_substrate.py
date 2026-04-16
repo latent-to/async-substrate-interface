@@ -24,7 +24,7 @@ from typing import (
 )
 
 import scalecodec
-from scalecodec import ScaleBytes
+from scalecodec import ScaleBytes, ScaleValue
 from scalecodec.base import ScaleType, RuntimeConfigurationObject
 from scalecodec.type_registry import load_type_registry_preset
 from scalecodec.types import (
@@ -417,7 +417,7 @@ class AsyncExtrinsicReceipt:
 class AsyncQueryMapResult:
     def __init__(
         self,
-        records: list,
+        records: list[tuple[ScaleValue, ScaleValue]],
         page_size: int,
         substrate: "AsyncSubstrateInterface",
         module: Optional[str] = None,
@@ -460,7 +460,7 @@ class AsyncQueryMapResult:
         self.last_key = result.last_key
         return result.records
 
-    async def retrieve_all_records(self) -> list[Any]:
+    async def retrieve_all_records(self) -> list[tuple[ScaleValue, ScaleValue]]:
         """
         Retrieves all records from all subsequent pages for the AsyncQueryMapResult,
         returning them as a list.
@@ -1259,7 +1259,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         self.config: dict[str, Any] = {
             "use_remote_preset": use_remote_preset,
             "auto_discover": auto_discover,
-            "rpc_methods": None,
+            "rpc_methods": None,  # TODO why is this always None?
             "strict_scale_decode": True,
         }
         self.initialized = False
@@ -1291,7 +1291,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             await self.ws.connect()
             if not self._chain:
                 chain = await self.rpc_request("system_chain", [])
-                self._chain = chain.get("result")
+                self._chain = chain.get("result", "")
             self.startup_block_hash = block_hash = await self.get_chain_head()
             self.startup_runtime_task = asyncio.create_task(
                 self.init_runtime(block_hash=block_hash, init=True)
@@ -1303,7 +1303,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     "System", "SS58Prefix", runtime=runtime
                 )
 
-                if ss58_prefix_constant:
+                if ss58_prefix_constant is not None:
+                    assert isinstance(ss58_prefix_constant.value, int)
                     self.ss58_format = ss58_prefix_constant.value
                     runtime.ss58_format = ss58_prefix_constant.value
                     runtime.runtime_config.ss58_format = ss58_prefix_constant.value
@@ -1405,7 +1406,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
             else:
                 raise e
         metadata_option_hex_str = metadata_rpc_result["result"]
-        metadata_option_bytes = bytes.fromhex(metadata_option_hex_str[2:])
+        assert isinstance(metadata_option_hex_str, str)
+        metadata_option_bytes = bytes.fromhex(
+            metadata_option_hex_str.removeprefix("0x")
+        )
         inner_bytes = _decode_option_opaque_metadata(metadata_option_bytes)
         if inner_bytes is None:
             return None
@@ -1414,7 +1418,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
     async def encode_scale(
         self,
         type_string,
-        value: Any,
+        value: ScaleValue,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
     ) -> bytes:
@@ -2323,7 +2327,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             block_hash=block_hash,
         )
         assert events is not None
-        return events.value
+        return cast(list[dict], events.value)
 
     async def get_metadata(self, block_hash=None):
         """
@@ -2387,6 +2391,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             response = await self.rpc_request(
                 "state_getStorage", [storage_key, block_hash]
             )
+        assert isinstance(response, dict)
         return response.get("result")
 
     @cached_fetcher(max_size=SUBSTRATE_RUNTIME_CACHE_SIZE)
@@ -2400,7 +2405,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
     async def _get_block_runtime_info(self, block_hash: str) -> dict:
         response = await self.rpc_request("state_getRuntimeVersion", [block_hash])
-        return response.get("result")
+        return response["result"]
 
     @cached_fetcher(max_size=SUBSTRATE_CACHE_METHOD_SIZE)
     async def get_block_runtime_version_for(self, block_hash: str):
@@ -2682,7 +2687,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         result_handler: Optional[ResultHandler] = None,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> Any:
+    ) -> dict[str, Any]:
         """
         Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
         `self.query_map` do not meet your needs.
@@ -2735,11 +2740,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
             else:
                 logger.error(f"Substrate Request Exception: {result[payload_id]}")
                 raise SubstrateRequestException(err_msg)
-        if "result" in result[payload_id][0]:
-            return result[payload_id][0]
+        response = result[payload_id][0]
+        assert isinstance(response, dict)
+        if "result" in response:
+            return response
         else:
             logger.error(f"Substrate Request Exception: {result[payload_id]}")
-            raise SubstrateRequestException(result[payload_id][0])
+            raise SubstrateRequestException(response)
 
     async def get_block_hash(self, block_id: Optional[int]) -> str:
         """
@@ -2872,7 +2879,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_keys: list[StorageKey],
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> list[tuple[StorageKey, Any]]:
+    ) -> list[tuple[StorageKey, ScaleValue]]:
         """
         Query multiple storage keys in one request.
 
@@ -3274,7 +3281,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> Any:
+    ) -> ScaleValue:
         logger.debug(
             f"Decoding old runtime call: {api}.{method} with params: {params} at block hash: {block_hash}"
         )
@@ -3336,7 +3343,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         method: str,
         params: Optional[list | dict] = None,
         block_hash: Optional[str] = None,
-    ) -> Any:
+    ) -> ScaleValue:
         """
         Calls a runtime API method
 
@@ -3427,6 +3434,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             nonce = await self.runtime_call(
                 "AccountNonceApi", "account_nonce", [account_address]
             )
+            assert isinstance(nonce, int)
             return nonce
         else:
             response = await self.query(
@@ -3517,7 +3525,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         constant_name: str,
         block_hash: Optional[str] = None,
         runtime: Optional[Runtime] = None,
-    ) -> Optional[ScaleType[Any]]:
+    ) -> Optional[ScaleType[ScaleValue]]:
         """
         Returns the decoded `ScaleType` object of the constant for given module name, call function name and block_hash
         (or chaintip if block_hash is omitted)
@@ -3598,6 +3606,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         result = await self.runtime_call(
             "TransactionPaymentApi", "query_info", [extrinsic, extrinsic_len]
         )
+        assert isinstance(result, dict)
 
         return result
 
@@ -3695,7 +3704,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         raw_storage_key: Optional[bytes] = None,
         subscription_handler=None,
         runtime: Optional[Runtime] = None,
-    ) -> ScaleType[Any]:
+    ) -> ScaleType[ScaleValue]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
         you should use `self.query_multiple`
@@ -3831,7 +3840,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 method="state_getKeys", params=[prefix, block_hash], runtime=runtime
             )
 
-        result_keys = response.get("result")
+        result_keys = response["result"]
 
         result = []
         last_key = None
@@ -3966,8 +3975,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Compose 'as_multi' when final, 'approve_as_multi' otherwise
         if (
-            multisig_details_.value
-            and len(multisig_details_.value["approvals"]) + 1
+            multisig_details
+            and len(multisig_details["approvals"]) + 1
             == multisig_account.threshold
         ):
             multi_sig_call = await self.compose_call(
