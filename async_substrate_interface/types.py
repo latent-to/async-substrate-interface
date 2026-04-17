@@ -60,6 +60,7 @@ class RuntimeCache:
         if known_versions:
             self.add_known_versions(known_versions)
         self.last_used: Optional["Runtime"] = None
+        self._persisted_version_keys: set = set()
 
     def add_known_versions(self, known_versions: Sequence[tuple[int, int]]):
         """
@@ -174,19 +175,44 @@ class RuntimeCache:
         )
         self.block_hashes.cache = block_hash_mapping
         for x, y in runtime_version_mapping.items():
-            self.versions.cache[x] = Runtime.deserialize(y)
+            self.versions.cache[x] = y
+        self._persisted_version_keys = set(runtime_version_mapping.keys())
 
     async def dump_to_disk(self, chain_endpoint: str):
         db = AsyncSqliteDB(chain_endpoint=chain_endpoint)
         blocks = self.blocks.cache
         block_hashes = self.block_hashes.cache
-        versions = self.versions.cache
+        new_versions = {
+            k: v
+            for k, v in self.versions.cache.items()
+            if k not in self._persisted_version_keys
+        }
         await db.dump_runtime_cache(
             chain=chain_endpoint,
             block_mapping=blocks,
             block_hash_mapping=block_hashes,
-            version_mapping=versions,
+            version_mapping=new_versions,
         )
+        self._persisted_version_keys.update(new_versions.keys())
+
+
+def _propagate_runtime_config(obj, runtime_config, _seen=None):
+    if _seen is None:
+        _seen = set()
+    oid = id(obj)
+    if oid in _seen or not isinstance(obj, ScaleType):
+        return
+    _seen.add(oid)
+    obj.runtime_config = runtime_config
+    vo = obj.value_object
+    if isinstance(vo, dict):
+        for v in vo.values():
+            _propagate_runtime_config(v, runtime_config, _seen)
+    elif isinstance(vo, (list, tuple)):
+        for v in vo:
+            _propagate_runtime_config(v, runtime_config, _seen)
+    elif isinstance(vo, ScaleType):
+        _propagate_runtime_config(vo, runtime_config, _seen)
 
 
 def _decode_option_opaque_metadata(data: bytes) -> Optional[bytes]:
@@ -301,6 +327,73 @@ class Runtime:
             },
             "ss58_format": self.ss58_format,
         }
+
+    def __getstate__(self):
+        meta_v15_is_same = self.metadata_v15 is self.metadata
+        return {
+            "chain": self.chain,
+            "type_registry": self.type_registry,
+            "runtime_info": self.runtime_info,
+            "ss58_format": self.ss58_format,
+            "type_registry_preset": self.type_registry_preset,
+            "config": self.config,
+            "registry_type_map": getattr(self, "registry_type_map", {}),
+            "type_id_to_name": getattr(self, "type_id_to_name", {}),
+            "runtime_api_map": getattr(self, "runtime_api_map", {}),
+            "metadata": self.metadata,
+            "metadata_v15_is_same": meta_v15_is_same,
+            "metadata_v15": None if meta_v15_is_same else self.metadata_v15,
+        }
+
+    def __setstate__(self, state):
+        from scalecodec.type_registry import load_type_registry_preset
+
+        self.chain = state["chain"]
+        self.type_registry = state["type_registry"]
+        runtime_info = state.get("runtime_info") or {}
+        self.runtime_info = runtime_info
+        self.ss58_format = state.get("ss58_format", SS58_FORMAT)
+        self.type_registry_preset = state.get("type_registry_preset")
+        self.config = state.get("config", {})
+        self.registry_type_map = state.get("registry_type_map", {})
+        self.type_id_to_name = state.get("type_id_to_name", {})
+        self.runtime_api_map = state.get("runtime_api_map", {})
+        self.runtime_version = runtime_info.get("specVersion")
+        self.transaction_version = runtime_info.get("transactionVersion")
+
+        # Restore the already-decoded metadata (value_object is intact from pickle)
+        self.metadata = state["metadata"]
+        if state.get("metadata_v15_is_same"):
+            self.metadata_v15 = self.metadata
+        else:
+            self.metadata_v15 = state.get("metadata_v15")
+
+        # Rebuild runtime_config without calling metadata.decode()
+        self.runtime_config = RuntimeConfigurationObject(
+            ss58_format=self.ss58_format,
+            implements_scale_info=self.implements_scaleinfo,
+        )
+        self.runtime_config.clear_type_registry()
+        self.runtime_config.update_type_registry(
+            load_type_registry_preset(name="core") or {}
+        )
+        if self.runtime_version is not None:
+            self.runtime_config.set_active_spec_version_id(self.runtime_version)
+        self.apply_type_registry_presets(use_remote_preset=False, auto_discover=True)
+        if self.implements_scaleinfo:
+            self.runtime_config.add_portable_registry(self.metadata)
+        if self.config.get("is_weight_v2"):
+            self.runtime_config.update_type_registry_types(
+                {"Weight": "sp_weights::weight_v2::Weight"}
+            )
+        else:
+            self.runtime_config.update_type_registry_types({"Weight": "WeightV1"})
+
+        # Propagate runtime_config to all decoded sub-objects in the metadata tree
+        if self.metadata is not None:
+            _propagate_runtime_config(self.metadata, self.runtime_config)
+        if self.metadata_v15 is not None and self.metadata_v15 is not self.metadata:
+            _propagate_runtime_config(self.metadata_v15, self.runtime_config)
 
     @classmethod
     def deserialize(cls, serialized: dict) -> "Runtime":

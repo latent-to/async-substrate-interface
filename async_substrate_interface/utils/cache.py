@@ -184,9 +184,9 @@ class AsyncSqliteDB:
         block_hash_mapping: OrderedDict[str, int] = OrderedDict()
         version_mapping: OrderedDict[int, dict] = OrderedDict()
         tables: dict[str, OrderedDict] = {
-            "RuntimeCache_blocks_v2": block_mapping,
-            "RuntimeCache_block_hashes_v2": block_hash_mapping,
-            "RuntimeCache_versions_v2": version_mapping,
+            "RuntimeCache_blocks_v3": block_mapping,
+            "RuntimeCache_block_hashes_v3": block_hash_mapping,
+            "RuntimeCache_versions_v3": version_mapping,
         }
         for table in tables.keys():
             async with self._lock:
@@ -227,9 +227,9 @@ class AsyncSqliteDB:
                 self._db = await aiosqlite.connect(CACHE_LOCATION)
 
             tables = {
-                "RuntimeCache_blocks_v2": block_mapping,
-                "RuntimeCache_block_hashes_v2": block_hash_mapping,
-                "RuntimeCache_versions_v2": version_mapping,
+                "RuntimeCache_blocks_v3": block_mapping,
+                "RuntimeCache_block_hashes_v3": block_hash_mapping,
+                "RuntimeCache_versions_v3": version_mapping,
             }
             for table, mapping in tables.items():
                 local_chain = await self._create_if_not_exists(chain, table)
@@ -237,11 +237,8 @@ class AsyncSqliteDB:
                     return None
                 serialized_mapping = {}
                 for key, value in mapping.items():
-                    if not isinstance(value, (str, int)):
-                        serialized_value = pickle.dumps(value.serialize())
-                    else:
-                        serialized_value = pickle.dumps(value)
-                    serialized_mapping[key] = serialized_value
+                    serialized_mapping[key] = pickle.dumps(value)
+
 
                 await self._db.executemany(
                     f"INSERT OR REPLACE INTO {table} (key, value, chain) VALUES (?,?,?)",
