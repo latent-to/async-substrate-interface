@@ -485,6 +485,8 @@ class CachedFetcher:
             raise
         finally:
             self._inflight.pop(key, None)
+            if not future.done():
+                future.cancel()
 
 
 class _WeakMethod:

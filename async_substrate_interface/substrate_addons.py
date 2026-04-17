@@ -319,6 +319,15 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
             )
         else:
             logger.error(f"Connection error. Trying again with {next_network}")
+        if (
+            self.startup_runtime_task is not None
+            and not self.startup_runtime_task.done()
+        ):
+            self.startup_runtime_task.cancel()
+            try:
+                await self.startup_runtime_task
+            except asyncio.CancelledError:
+                pass
         try:
             await self.ws.shutdown()
         except AttributeError:
