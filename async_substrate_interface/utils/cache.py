@@ -239,7 +239,6 @@ class AsyncSqliteDB:
                 for key, value in mapping.items():
                     serialized_mapping[key] = pickle.dumps(value)
 
-
                 await self._db.executemany(
                     f"INSERT OR REPLACE INTO {table} (key, value, chain) VALUES (?,?,?)",
                     [
