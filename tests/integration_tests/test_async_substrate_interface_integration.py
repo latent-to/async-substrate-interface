@@ -32,7 +32,7 @@ async def get_mock_substrate(seed: str):
     sub = AsyncSubstrateInterface(
         "ws://127.0.0.1", ss58_format=42, chain_name="Bittensor", _mock=True
     )
-    sub.ws = MockWebsocket(seed=seed)
+    sub.ws = MockWebsocket(seed=seed)  # type: ignore[assignment]
     await sub.initialize()
     return sub
 
