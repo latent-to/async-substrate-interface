@@ -475,7 +475,7 @@ class SubstrateInterface(SubstrateMixin):
         *,
         use_remote_preset: bool = False,
         auto_discover: bool = True,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         chain_name: str = "",

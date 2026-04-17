@@ -667,7 +667,7 @@ class SubstrateMixin(ABC):
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         use_remote_preset: bool = False,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
     ):
         # We load a very basic RuntimeConfigurationObject that is only used for the initial metadata decoding
         self.runtime_config = RuntimeConfigurationObject(ss58_format=ss58_format)
@@ -718,7 +718,7 @@ class SubstrateMixin(ABC):
         return self._chain
 
     def ss58_encode(
-        self, public_key: str | bytes, ss58_format: Optional[int] = None
+        self, public_key: str | bytes, ss58_format: Optional[int] = SS58_FORMAT
     ) -> str:
         """
         Helper function to encode a public key to SS58 address.

@@ -13,6 +13,7 @@ from typing import Optional
 from websockets.exceptions import ConnectionClosed
 
 from async_substrate_interface.async_substrate import AsyncSubstrateInterface, Websocket
+from async_substrate_interface.const import SS58_FORMAT
 from async_substrate_interface.errors import MaxRetriesExceeded, StateDiscardedError
 from async_substrate_interface.sync_substrate import SubstrateInterface
 
@@ -110,7 +111,7 @@ class RetrySyncSubstrate(SubstrateInterface):
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         chain_name: str = "",
@@ -256,7 +257,7 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         chain_name: str = "",
