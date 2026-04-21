@@ -1666,7 +1666,7 @@ class SubstrateInterface(SubstrateMixin):
                 pallet=module,
                 storage_function=storage_function,
                 value_scale_type=value_scale_type,
-                metadata=self.metadata,
+                metadata=self.runtime.metadata,
                 runtime_config=self.runtime_config,
             )
         else:
@@ -2734,7 +2734,7 @@ class SubstrateInterface(SubstrateMixin):
     ) -> ScaleType[Any]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
-        you should use ``self.query_multiple``
+        you should use `self.query_multi`
         """
         if block_hash:
             self.last_block_hash = block_hash

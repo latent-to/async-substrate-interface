@@ -3666,7 +3666,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
     ) -> ScaleType[ScaleValue]:
         """
         Queries substrate. This should only be used when making a single request. For multiple requests,
-        you should use `self.query_multiple`
+        you should use `self.query_multi`
         """
         if block_hash:
             self.last_block_hash = block_hash
