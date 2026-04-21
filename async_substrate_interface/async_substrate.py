@@ -2689,7 +2689,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         runtime: Optional[Runtime] = None,
     ) -> dict[str, Any]:
         """
-        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multiple` and
+        Makes an RPC request to the subtensor. Use this only if `self.query` and `self.query_multi` and
         `self.query_map` do not meet your needs.
 
         Args:
@@ -2832,48 +2832,6 @@ class AsyncSubstrateInterface(SubstrateMixin):
         )
 
         return call
-
-    async def query_multiple(
-        self,
-        params: list,
-        storage_function: str,
-        module: str,
-        block_hash: Optional[str] = None,
-        runtime: Optional[Runtime] = None,
-    ) -> dict[str, ScaleType]:
-        """
-        Queries the subtensor. Only use this when making multiple queries, else use ``self.query``
-        """
-        # By allowing for specifying the block hash, users, if they have multiple query types they want
-        # to do, can simply query the block hash first, and then pass multiple query_subtensor calls
-        # into an asyncio.gather, with the specified block hash
-        if block_hash:
-            self.last_block_hash = block_hash
-        if runtime is None:
-            runtime = await self.init_runtime(block_hash=block_hash)
-        preprocessed: list[Preprocessed] = await asyncio.gather(
-            *[
-                self._preprocess(
-                    [x], block_hash, storage_function, module, runtime=runtime
-                )
-                for x in params
-            ]
-        )
-        all_info = [
-            self.make_payload(item.queryable, item.method, item.params)
-            for item in preprocessed
-        ]
-        # These will always be the same throughout the preprocessed list, so we just grab the first one
-        value_scale_type = preprocessed[0].value_scale_type
-        storage_item = preprocessed[0].storage_item
-
-        responses = await self._make_rpc_request(
-            all_info, value_scale_type, storage_item, runtime=runtime
-        )
-        return {
-            param: cast(ScaleType, responses[p.queryable][0])
-            for (param, p) in zip(params, preprocessed)
-        }
 
     async def query_multi(
         self,
