@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: venv
-          key: v1-lint-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: v2-lint-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
 
       - name: Install deps
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
