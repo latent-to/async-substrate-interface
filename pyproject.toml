@@ -9,10 +9,9 @@ keywords = ["substrate", "development", "bittensor"]
 dependencies = [
     "wheel",
     "aiosqlite>=0.21.0,<1.0.0",
-    "cyscale==0.3.0",
+    "cyscale>=0.3.0,<1.0.0",
     "websockets>=14.1",
     "xxhash",
-    "ruff==0.11.5",
 ]
 
 requires-python = ">=3.10,<3.15"
@@ -73,4 +72,5 @@ dev = [
     "bittensor-wallet>=4.0.0",
     "pytest-forked",
     "mypy>=1.10.0",
+    "ruff==0.11.5",
 ]
