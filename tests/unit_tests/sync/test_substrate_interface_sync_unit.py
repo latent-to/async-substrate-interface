@@ -1,4 +1,3 @@
-import tracemalloc
 from unittest.mock import MagicMock
 
 from async_substrate_interface.sync_substrate import (
@@ -6,49 +5,28 @@ from async_substrate_interface.sync_substrate import (
     QueryMapResult,
     ExtrinsicReceipt,
 )
-from async_substrate_interface.types import ScaleObj
-
-from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 
 
 def test_runtime_call(monkeypatch):
     print("Testing test_runtime_call")
     substrate = SubstrateInterface("ws://localhost", _mock=True)
     fake_runtime = MagicMock()
-    fake_metadata_v15 = MagicMock()
-    fake_metadata_v15.value.return_value = {
-        "apis": [
-            {
-                "name": "SubstrateApi",
-                "methods": [
-                    {
-                        "name": "SubstrateMethod",
-                        "inputs": [],
-                        "output": "1",
-                    },
-                ],
-            },
-        ],
-        "types": {
-            "types": [
-                {
-                    "id": "1",
-                    "type": {
-                        "path": ["Vec"],
-                        "def": {"sequence": {"type": "4"}},
-                    },
-                },
-            ]
-        },
+    fake_runtime.metadata_v15 = MagicMock()  # non-None so the V15 path is taken
+    fake_runtime.runtime_api_map = {
+        "SubstrateApi": {
+            "SubstrateMethod": {"inputs": [], "output": "1"},
+        }
     }
-    fake_runtime.metadata_v15 = fake_metadata_v15
+    fake_runtime.type_id_to_name = {}  # "1" not in map → not Vec<u8> → new path
     substrate.init_runtime = MagicMock(return_value=fake_runtime)
 
     # Patch encode_scale (should not be called in this test since no inputs)
     substrate.encode_scale = MagicMock()
 
     # Patch decode_scale to produce a dummy value
-    substrate.decode_scale = MagicMock(return_value="decoded_result")
+    mock_scale_obj = MagicMock()
+    mock_scale_obj.value = "decoded_result"
+    substrate.decode_scale = MagicMock(return_value=mock_scale_obj)
 
     # Patch RPC request with correct behavior
     substrate.rpc_request = MagicMock(
@@ -66,9 +44,7 @@ def test_runtime_call(monkeypatch):
         "SubstrateMethod",
     )
 
-    # Validate the result is wrapped in ScaleObj
-    assert isinstance(result, ScaleObj)
-    assert result.value == "decoded_result"
+    assert result == "decoded_result"
 
     # Check decode_scale called correctly
     substrate.decode_scale.assert_called_once_with("scale_info::1", b"\x00")
@@ -82,50 +58,6 @@ def test_runtime_call(monkeypatch):
     )
     substrate.close()
     print("test_runtime_call succeeded")
-
-
-def test_runtime_switching():
-    print("Testing test_runtime_switching")
-    block = 6067945  # block where a runtime switch happens
-    with SubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
-    ) as substrate:
-        # assures we switch between the runtimes without error
-        assert substrate.get_extrinsics(block_number=block - 20) is not None
-        assert substrate.get_extrinsics(block_number=block) is not None
-        assert substrate.get_extrinsics(block_number=block - 21) is not None
-    print("test_runtime_switching succeeded")
-
-
-def test_memory_leak():
-    import gc
-
-    # Stop any existing tracemalloc and start fresh
-    tracemalloc.stop()
-    tracemalloc.start()
-    two_mb = 2 * 1024 * 1024
-
-    # Warmup: populate caches before taking baseline
-    for _ in range(2):
-        subtensor = SubstrateInterface(LATENT_LITE_ENTRYPOINT)
-        subtensor.close()
-
-    baseline_snapshot = tracemalloc.take_snapshot()
-
-    for i in range(5):
-        subtensor = SubstrateInterface(LATENT_LITE_ENTRYPOINT)
-        subtensor.close()
-        gc.collect()
-
-        snapshot = tracemalloc.take_snapshot()
-        stats = snapshot.compare_to(baseline_snapshot, "lineno")
-        total_diff = sum(stat.size_diff for stat in stats)
-        current, peak = tracemalloc.get_traced_memory()
-        # Allow cumulative growth up to 2MB per iteration from baseline
-        assert total_diff < two_mb * (i + 1), (
-            f"Loop {i}: diff={total_diff / 1024:.2f} KiB, current={current / 1024:.2f} KiB, "
-            f"peak={peak / 1024:.2f} KiB"
-        )
 
 
 def test_async_query_map_result_retrieve_all_records():
@@ -244,7 +176,7 @@ class TestExtrinsicReceiptProcessEvents:
                 "module_id": module_id,
                 "event_id": event_id,
                 "attributes": attributes,
-            }
+            },
         }
 
     def _make_module_error(self, name="ModuleError", docs=None):

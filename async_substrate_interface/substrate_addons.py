@@ -13,6 +13,7 @@ from typing import Optional
 from websockets.exceptions import ConnectionClosed
 
 from async_substrate_interface.async_substrate import AsyncSubstrateInterface, Websocket
+from async_substrate_interface.const import SS58_FORMAT
 from async_substrate_interface.errors import MaxRetriesExceeded, StateDiscardedError
 from async_substrate_interface.sync_substrate import SubstrateInterface
 
@@ -63,7 +64,6 @@ RETRY_METHODS = [
     "query",
     "query_map",
     "query_multi",
-    "query_multiple",
     "retrieve_extrinsic_by_identifier",
     "rpc_request",
     "runtime_call",
@@ -107,10 +107,11 @@ class RetrySyncSubstrate(SubstrateInterface):
     def __init__(
         self,
         url: str,
+        *,
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         chain_name: str = "",
@@ -252,10 +253,11 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
     def __init__(
         self,
         url: str,
+        *,
         use_remote_preset: bool = False,
         fallback_chains: Optional[list[str]] = None,
         retry_forever: bool = False,
-        ss58_format: Optional[int] = None,
+        ss58_format: Optional[int] = SS58_FORMAT,
         type_registry: Optional[dict] = None,
         type_registry_preset: Optional[str] = None,
         chain_name: str = "",
@@ -317,6 +319,15 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
             )
         else:
             logger.error(f"Connection error. Trying again with {next_network}")
+        if (
+            self.startup_runtime_task is not None
+            and not self.startup_runtime_task.done()
+        ):
+            self.startup_runtime_task.cancel()
+            try:
+                await self.startup_runtime_task
+            except asyncio.CancelledError:
+                pass
         try:
             await self.ws.shutdown()
         except AttributeError:
@@ -348,8 +359,9 @@ class RetryAsyncSubstrate(AsyncSubstrateInterface):
         except (
             MaxRetriesExceeded,
             ConnectionError,
-            ConnectionClosed,
             EOFError,
+            ConnectionClosed,
+            TimeoutError,
             socket.gaierror,
             StateDiscardedError,
         ) as e:

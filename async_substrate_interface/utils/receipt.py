@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional
 
 
 def _get_event_parts(event: dict) -> tuple[str, str, dict]:
@@ -43,7 +43,7 @@ def is_extrinsic_failure_event(event: dict) -> bool:
     )
 
 
-def extract_success_weight(event: dict) -> Union[int, dict]:
+def extract_success_weight(event: dict) -> int | dict:
     _, _, attributes = _get_event_parts(event)
     if "dispatch_info" in attributes:
         return attributes["dispatch_info"]["weight"]

@@ -1,8 +1,9 @@
 import binascii
 from typing import Any, Optional
 
-from scalecodec import ScaleBytes, GenericMetadataVersioned, ss58_decode
+from scalecodec import ScaleBytes, GenericMetadataVersioned
 from scalecodec.base import ScaleDecoder, RuntimeConfigurationObject, ScaleType
+from scalecodec.utils.ss58 import ss58_decode
 from async_substrate_interface.errors import StorageFunctionNotFound
 from async_substrate_interface.utils.hasher import (
     blake2_256,
@@ -24,23 +25,23 @@ class StorageKey:
 
     def __init__(
         self,
-        pallet: str,
-        storage_function: str,
-        params: list,
-        data: bytes,
-        value_scale_type: str,
+        pallet: Optional[str],
+        storage_function: Optional[str],
+        params: Optional[list],
+        data: Optional[bytes],
+        value_scale_type: Optional[str],
         metadata: GenericMetadataVersioned,
         runtime_config: RuntimeConfigurationObject,
     ):
         self.pallet = pallet
         self.storage_function = storage_function
         self.params = params
-        self.params_encoded = []
+        self.params_encoded: list[Any] = []
         self.data = data
         self.metadata = metadata
         self.runtime_config = runtime_config
         self.value_scale_type = value_scale_type
-        self.metadata_storage_function = None
+        self.metadata_storage_function: Optional[Any] = None
 
     @classmethod
     def create_from_data(
@@ -140,7 +141,7 @@ class StorageKey:
 
         return value
 
-    def to_hex(self) -> str:
+    def to_hex(self) -> Optional[str]:
         """
         Returns a Hex-string representation of current StorageKey data
 
@@ -149,6 +150,7 @@ class StorageKey:
         """
         if self.data:
             return f"0x{self.data.hex()}"
+        return None
 
     def generate(self) -> bytes:
         """
@@ -156,6 +158,8 @@ class StorageKey:
         """
 
         # Search storage call in metadata
+        assert self.pallet is not None
+        assert self.storage_function is not None
         metadata_pallet = self.metadata.get_metadata_pallet(self.pallet)
 
         if not metadata_pallet:
@@ -209,6 +213,7 @@ class StorageKey:
                 elif type(param) is ScaleBytes:
                     params_key += param.data
                 elif isinstance(param, ScaleDecoder):
+                    assert param.data is not None
                     params_key += param.data.data
 
                 if not param_hasher:
@@ -241,6 +246,8 @@ class StorageKey:
 
     def decode_scale_value(self, data: Optional[ScaleBytes] = None) -> ScaleType:
         result_found = False
+        assert self.metadata_storage_function is not None
+        assert self.value_scale_type is not None
 
         if data is not None:
             change_scale_type = self.value_scale_type

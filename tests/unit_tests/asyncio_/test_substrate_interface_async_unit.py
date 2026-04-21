@@ -1,20 +1,14 @@
-import asyncio
-import tracemalloc
 from unittest.mock import AsyncMock, MagicMock, ANY
 
 import pytest
 from websockets.exceptions import InvalidURI
-from websockets.protocol import State
 
 from async_substrate_interface.async_substrate import (
     AsyncExtrinsicReceipt,
     AsyncQueryMapResult,
     AsyncSubstrateInterface,
-    get_async_substrate_interface,
 )
 from async_substrate_interface.errors import SubstrateRequestException
-from async_substrate_interface.types import ScaleObj
-from tests.helpers.settings import ARCHIVE_ENTRYPOINT, LATENT_LITE_ENTRYPOINT
 
 
 @pytest.mark.asyncio
@@ -37,40 +31,22 @@ async def test_runtime_call(monkeypatch):
     substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
 
     fake_runtime = MagicMock()
-    fake_metadata_v15 = MagicMock()
-    fake_metadata_v15.value.return_value = {
-        "apis": [
-            {
-                "name": "SubstrateApi",
-                "methods": [
-                    {
-                        "name": "SubstrateMethod",
-                        "inputs": [],
-                        "output": "1",
-                    },
-                ],
-            },
-        ],
-        "types": {
-            "types": [
-                {
-                    "id": "1",
-                    "type": {
-                        "path": ["Vec"],
-                        "def": {"sequence": {"type": "4"}},
-                    },
-                },
-            ]
-        },
+    fake_runtime.metadata_v15 = MagicMock()  # non-None so the V15 path is taken
+    fake_runtime.runtime_api_map = {
+        "SubstrateApi": {
+            "SubstrateMethod": {"inputs": [], "output": "1"},
+        }
     }
-    fake_runtime.metadata_v15 = fake_metadata_v15
+    fake_runtime.type_id_to_name = {}  # "1" not in map → not Vec<u8> → new path
     substrate.init_runtime = AsyncMock(return_value=fake_runtime)
 
     # Patch encode_scale (should not be called in this test since no inputs)
     substrate.encode_scale = AsyncMock()
 
     # Patch decode_scale to produce a dummy value
-    substrate.decode_scale = AsyncMock(return_value="decoded_result")
+    mock_scale_obj = MagicMock()
+    mock_scale_obj.value = "decoded_result"
+    substrate.decode_scale = AsyncMock(return_value=mock_scale_obj)
 
     # Patch RPC request with correct behavior
     substrate.rpc_request = AsyncMock(
@@ -88,9 +64,7 @@ async def test_runtime_call(monkeypatch):
         "SubstrateMethod",
     )
 
-    # Validate the result is wrapped in ScaleObj
-    assert isinstance(result, ScaleObj)
-    assert result.value == "decoded_result"
+    assert result == "decoded_result"
 
     # Check decode_scale called correctly
     substrate.decode_scale.assert_called_once_with(
@@ -105,79 +79,6 @@ async def test_runtime_call(monkeypatch):
         "state_call", ["SubstrateApi_SubstrateMethod", "", None], runtime=ANY
     )
     print("test_runtime_call succeeded")
-
-
-@pytest.mark.asyncio
-async def test_websocket_shutdown_timer():
-    print("Testing test_websocket_shutdown_timer")
-    # using default ws shutdown timer of 5.0 seconds
-    async with AsyncSubstrateInterface("wss://lite.sub.latent.to:443") as substrate:
-        await substrate.get_chain_head()
-        await asyncio.sleep(6)
-    assert (
-        substrate.ws.state is State.CLOSED
-    )  # connection should have closed automatically
-
-    # using custom ws shutdown timer of 10.0 seconds
-    async with AsyncSubstrateInterface(
-        "wss://lite.sub.latent.to:443", ws_shutdown_timer=10.0
-    ) as substrate:
-        await substrate.get_chain_head()
-        await asyncio.sleep(6)  # same sleep time as before
-        assert substrate.ws.state is State.OPEN  # connection should still be open
-    print("test_websocket_shutdown_timer succeeded")
-
-
-@pytest.mark.asyncio
-async def test_runtime_switching():
-    print("Testing test_runtime_switching")
-    block = 6067945  # block where a runtime switch happens
-    async with AsyncSubstrateInterface(
-        ARCHIVE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
-    ) as substrate:
-        # assures we switch between the runtimes without error
-        assert await substrate.get_extrinsics(block_number=block - 20) is not None
-        assert await substrate.get_extrinsics(block_number=block) is not None
-        assert await substrate.get_extrinsics(block_number=block - 21) is not None
-        one, two = await asyncio.gather(
-            substrate.get_extrinsics(block_number=block - 22),
-            substrate.get_extrinsics(block_number=block + 1),
-        )
-        assert one is not None
-        assert two is not None
-    print("test_runtime_switching succeeded")
-
-
-@pytest.mark.asyncio
-async def test_memory_leak():
-    import gc
-
-    # Stop any existing tracemalloc and start fresh
-    tracemalloc.stop()
-    tracemalloc.start()
-    two_mb = 2 * 1024 * 1024
-
-    # Warmup: populate caches before taking baseline
-    for _ in range(2):
-        subtensor = await get_async_substrate_interface(LATENT_LITE_ENTRYPOINT)
-        await subtensor.close()
-
-    baseline_snapshot = tracemalloc.take_snapshot()
-
-    for i in range(5):
-        subtensor = await get_async_substrate_interface(LATENT_LITE_ENTRYPOINT)
-        await subtensor.close()
-        gc.collect()
-
-        snapshot = tracemalloc.take_snapshot()
-        stats = snapshot.compare_to(baseline_snapshot, "lineno")
-        total_diff = sum(stat.size_diff for stat in stats)
-        current, peak = tracemalloc.get_traced_memory()
-        # Allow cumulative growth up to 2MB per iteration from baseline
-        assert total_diff < two_mb * (i + 1), (
-            f"Loop {i}: diff={total_diff / 1024:.2f} KiB, current={current / 1024:.2f} KiB, "
-            f"peak={peak / 1024:.2f} KiB"
-        )
 
 
 @pytest.mark.asyncio

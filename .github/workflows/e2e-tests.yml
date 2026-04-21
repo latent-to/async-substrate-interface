@@ -32,7 +32,7 @@ jobs:
       test-files: ${{ steps.get-tests.outputs.test-files }}
     steps:
       - name: Check-out repository under $GITHUB_WORKSPACE
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Find test files
         id: get-tests
@@ -125,10 +125,10 @@ jobs:
         os:
           - ubuntu-latest
         test-file: ${{ fromJson(needs.find-tests.outputs.test-files) }}
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.14"]  # Only run on oldest and latest supported versions
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5

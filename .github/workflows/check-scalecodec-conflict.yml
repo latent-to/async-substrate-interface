@@ -1,0 +1,45 @@
+name: Check scalecodec conflict error
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  check-scalecodec-conflict:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install async-substrate-interface with scalecodec
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install uv
+          python -m uv pip install --system .
+          python -m uv pip install --system scalecodec cyscale
+
+      - name: Verify conflict raises RuntimeError
+        run: |
+          python - <<'EOF'
+          import sys
+          try:
+              import async_substrate_interface
+              print("ERROR: No exception was raised — conflict check is broken.")
+              sys.exit(1)
+          except RuntimeError as e:
+              if "scalecodec" in str(e):
+                  print("OK: RuntimeError raised as expected.")
+                  sys.exit(0)
+              else:
+                  print(f"ERROR: Unexpected RuntimeError: {e}")
+                  sys.exit(1)
+          EOF
