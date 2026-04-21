@@ -2013,7 +2013,8 @@ class SubstrateInterface(SubstrateMixin):
 
         responses = self._make_rpc_request(all_info, value_scale_type, storage_item)
         return {
-            param: responses[p.queryable][0] for (param, p) in zip(params, preprocessed)
+            param: cast(ScaleType, responses[p.queryable][0])
+            for (param, p) in zip(params, preprocessed)
         }
 
     def query_multi(

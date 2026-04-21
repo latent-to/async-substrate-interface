@@ -2871,7 +2871,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             all_info, value_scale_type, storage_item, runtime=runtime
         )
         return {
-            param: responses[p.queryable][0] for (param, p) in zip(params, preprocessed)
+            param: cast(ScaleType, responses[p.queryable][0])
+            for (param, p) in zip(params, preprocessed)
         }
 
     async def query_multi(
