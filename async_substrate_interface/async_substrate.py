@@ -2851,7 +2851,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             self.last_block_hash = block_hash
         if runtime is None:
             runtime = await self.init_runtime(block_hash=block_hash)
-        preprocessed: tuple[Preprocessed] = await asyncio.gather(
+        preprocessed: list[Preprocessed] = await asyncio.gather(
             *[
                 self._preprocess(
                     [x], block_hash, storage_function, module, runtime=runtime
