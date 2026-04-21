@@ -1,4 +1,4 @@
-from typing import Awaitable, Protocol, Union, Optional, runtime_checkable
+from typing import Awaitable, Protocol, Optional, runtime_checkable
 
 
 __all__: list[str] = ["Keypair"]
@@ -33,4 +33,4 @@ class Keypair(Protocol):
     @property
     def ss58_format(self) -> int: ...
 
-    def sign(self, data: Union[bytes, str]) -> Union[bytes, Awaitable[bytes]]: ...
+    def sign(self, data: bytes | str) -> bytes | Awaitable[bytes]: ...

@@ -98,7 +98,7 @@ async def test_disk_cache():
         LATENT_LITE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
     ) as disk_cached_substrate:
         start = time.monotonic()
-        new_block_hash = await disk_cached_substrate.get_block_hash(current_block)
+        _ = await disk_cached_substrate.get_block_hash(current_block)
         new_time = time.monotonic()
         assert new_time - start < DISK_CACHE_TIMEOUT
 

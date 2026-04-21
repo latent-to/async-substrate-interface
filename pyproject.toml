@@ -1,44 +1,43 @@
 [project]
 name = "async-substrate-interface"
-version = "1.6.4"
+version = "2.0.0"
 description = "Asyncio library for interacting with substrate. Mostly API-compatible with py-substrate-interface"
 readme = "README.md"
 license = { file = "LICENSE" }
 keywords = ["substrate", "development", "bittensor"]
 
 dependencies = [
-  "wheel",
-  "aiosqlite>=0.21.0,<1.0.0",
-  "bt-decode==v0.8.0",
-  "scalecodec~=1.2.11",
-  "websockets>=14.1",
-  "xxhash",
+    "wheel",
+    "aiosqlite>=0.21.0,<1.0.0",
+    "cyscale>=0.3.0,<1.0.0",
+    "websockets>=14.1",
+    "xxhash",
 ]
 
 requires-python = ">=3.10,<3.15"
 
 authors = [
-  { name = "Opentensor Foundation" },
-  { name = "BD Himes", email = "b@latent.to" }
+    { name = "Opentensor Foundation" },
+    { name = "BD Himes", email = "b@latent.to" }
 ]
 
 maintainers = [
-  { name = "Latent Holdings" },
-  { name = "BD Himes", email = "b@latent.to" }
+    { name = "Latent Holdings" },
+    { name = "BD Himes", email = "b@latent.to" }
 ]
 
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
-  "Intended Audience :: Developers",
-  "Topic :: Software Development :: Libraries",
-  "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
-  "Programming Language :: Python :: 3 :: Only",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
 ]
 
 [project.urls]
@@ -50,13 +49,20 @@ exclude = ["tests*"]
 [tool.setuptools.package-data]
 async_substrate_interface = ["py.typed"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "module"
+
+
+[tool.mypy]
+ignore_missing_imports = true
+
 [build-system]
 requires = ["setuptools>=70.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 dev = [
-    "bittensor",
     "pytest==8.3.5",
     "pytest-asyncio==0.26.0",
     "pytest-mock==3.14.0",
@@ -64,5 +70,7 @@ dev = [
     "pytest-xdist==3.6.1",
     "pytest-rerunfailures==10.2",
     "bittensor-wallet>=4.0.0",
-    "pytest-forked"
+    "pytest-forked",
+    "mypy>=1.20.1",
+    "ruff==0.11.5",
 ]

@@ -1,21 +1,16 @@
-name: Unit and integration tests checker
+name: Lint
 permissions:
   contents: read
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 jobs:
-  unit-and-integration-tests:
-    if: github.event.pull_request.draft == false
+  lint:
+    if: '!github.event.pull_request.draft'
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      max-parallel: 5
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -24,14 +19,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Cache venv
         id: cache
         uses: actions/cache@v5
         with:
           path: venv
-          key: v2-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: v2-lint-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
 
       - name: Install deps
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -42,18 +37,17 @@ jobs:
           python -m pip install uv
           python -m uv sync --extra dev --active
 
-      - name: Unit tests
-        timeout-minutes: 20
-        env:
-          PYTHONUNBUFFERED: "1"
+      - name: ruff check
         run: |
           source venv/bin/activate
-          python -m uv run pytest tests/unit_tests/ --reruns 3 -s
+          ruff check async_substrate_interface/
 
-      - name: Integration tests
-        timeout-minutes: 20
-        env:
-          PYTHONUNBUFFERED: "1"
+      - name: ruff format
         run: |
           source venv/bin/activate
-          python -m uv run pytest tests/integration_tests/ --reruns 3 -s --forked
+          ruff format --check async_substrate_interface/
+
+      - name: mypy
+        run: |
+          source venv/bin/activate
+          mypy async_substrate_interface/

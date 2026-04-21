@@ -28,7 +28,7 @@ def wait_for_output(process, target_string, timeout=60):
     """
     import time
 
-    start_time = time.time()
+    start_time = time.monotonic()
 
     # Make stdout non-blocking on Unix systems
     if sys.platform != "win32":
@@ -39,7 +39,7 @@ def wait_for_output(process, target_string, timeout=60):
         fcntl.fcntl(process.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     buffer = ""
-    while time.time() - start_time < timeout:
+    while time.monotonic() - start_time < timeout:
         try:
             # Read available data
             chunk = process.stdout.read(1024)

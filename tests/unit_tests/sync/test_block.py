@@ -4,8 +4,6 @@ from unittest.mock import MagicMock
 from tests.helpers import settings
 from tests.helpers.fixtures import metadata_node_template_hex
 
-from scalecodec.exceptions import RemainingScaleBytesNotEmptyException
-
 from async_substrate_interface.sync_substrate import SubstrateInterface
 
 from scalecodec.base import ScaleBytes
