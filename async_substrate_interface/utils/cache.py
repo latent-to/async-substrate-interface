@@ -1,5 +1,8 @@
 import asyncio
+import builtins
+import importlib
 import inspect
+import io
 import time
 import weakref
 from collections import OrderedDict
@@ -26,6 +29,90 @@ CACHE_LOCATION = (
 SUBSTRATE_CACHE_METHOD_SIZE = int(os.getenv("SUBSTRATE_CACHE_METHOD_SIZE", "512"))
 
 logger = logging.getLogger("async_substrate_interface")
+
+
+# Names from `builtins` that are safe to instantiate during unpickling.
+# Excludes anything callable-as-code (eval, exec, getattr, open, ...).
+_SAFE_BUILTINS = frozenset(
+    {
+        "dict",
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "str",
+        "bytes",
+        "bytearray",
+        "int",
+        "float",
+        "bool",
+        "complex",
+    }
+)
+
+# (module, qualname) pairs from the stdlib we expect to see in cached payloads:
+#   - OrderedDict: runtime/method caches store these directly
+#   - socket.AddressFamily / SocketKind: elements of getaddrinfo() tuples in the DNS cache
+_SAFE_CLASSES = frozenset(
+    {
+        ("collections", "OrderedDict"),
+        ("socket", "AddressFamily"),
+        ("socket", "SocketKind"),
+    }
+)
+
+# Module prefixes whose classes we allow wholesale. Cached payloads from this
+# library include Runtime objects whose __getstate__ contains decoded scalecodec
+# objects (arbitrarily deep, version-dependent) — enumerating each class is
+# impractical, so we trust these two packages' own classes. Still blocks the
+# real gadget targets: os, subprocess, posix, shutil, pickle itself, etc.
+_SAFE_MODULE_PREFIXES = (
+    "async_substrate_interface.",
+    "scalecodec.",
+)
+
+
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Only resolve a restricted set of classes — refuses everything else.
+
+    Why: pickle.loads() on disk-backed data is an arbitrary-code-execution
+    vector. Overriding find_class blocks the GLOBAL/REDUCE gadgets that make
+    that possible, limiting reads to classes from the library's own trust
+    domain (this package + scalecodec) plus a small stdlib whitelist.
+    """
+
+    def find_class(self, module: str, name: str):
+        if module == "builtins" and name in _SAFE_BUILTINS:
+            return getattr(builtins, name)
+        if (module, name) in _SAFE_CLASSES:
+            return getattr(importlib.import_module(module), name)
+        if module.startswith(_SAFE_MODULE_PREFIXES) or any(
+            module == p.rstrip(".") for p in _SAFE_MODULE_PREFIXES
+        ):
+            return getattr(importlib.import_module(module), name)
+        raise pickle.UnpicklingError(
+            f"refusing to unpickle disallowed class: {module}.{name}"
+        )
+
+
+def _safe_loads(data: bytes) -> Any:
+    return _RestrictedUnpickler(io.BytesIO(data)).load()
+
+
+def _restrict_db_perms(path: str) -> None:
+    """Best-effort 0600 on the sqlite file. Skipped for :memory:."""
+    if path == ":memory:":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError as e:
+        logger.debug(f"could not chmod cache db {path}: {e}")
+
+
+async def _async_connect() -> aiosqlite.Connection:
+    conn = await aiosqlite.connect(CACHE_LOCATION)
+    _restrict_db_perms(CACHE_LOCATION)
+    return conn
 
 
 class AsyncSqliteDB:
@@ -91,7 +178,7 @@ class AsyncSqliteDB:
         async with self._lock:
             if not self._db:
                 _ensure_dir()
-                self._db = await aiosqlite.connect(CACHE_LOCATION)
+                self._db = await _async_connect()
             table_name = _get_table_name(func)
             local_chain = await self._create_if_not_exists(chain, table_name)
         key = pickle.dumps((args, kwargs or None))
@@ -104,7 +191,7 @@ class AsyncSqliteDB:
                 result = await cursor.fetchone()
                 await cursor.close()
                 if result is not None:
-                    return pickle.loads(result[0])
+                    return _safe_loads(result[0])
             except (pickle.PickleError, sqlite3.Error) as e:
                 logger.exception("Cache error", exc_info=e)
         result = await func(other_self, *args, **kwargs)
@@ -141,7 +228,7 @@ class AsyncSqliteDB:
         async with self._lock:
             if not self._db:
                 _ensure_dir()
-                self._db = await aiosqlite.connect(CACHE_LOCATION)
+                self._db = await _async_connect()
             await self._ensure_dns_table()
         try:
             cursor = await self._db.execute(
@@ -150,7 +237,7 @@ class AsyncSqliteDB:
             row = await cursor.fetchone()
             await cursor.close()
             if row is not None:
-                return pickle.loads(row[0]), row[1]
+                return _safe_loads(row[0]), row[1]
         except (pickle.PickleError, sqlite3.Error) as e:
             logger.debug(f"DNS cache load error: {e}")
         return None
@@ -162,7 +249,7 @@ class AsyncSqliteDB:
         async with self._lock:
             if not self._db:
                 _ensure_dir()
-                self._db = await aiosqlite.connect(CACHE_LOCATION)
+                self._db = await _async_connect()
             await self._ensure_dns_table()
             try:
                 await self._db.execute(
@@ -179,7 +266,7 @@ class AsyncSqliteDB:
         async with self._lock:
             if not self._db:
                 _ensure_dir()
-                self._db = await aiosqlite.connect(CACHE_LOCATION)
+                self._db = await _async_connect()
         block_mapping: OrderedDict[int, str] = OrderedDict()
         block_hash_mapping: OrderedDict[str, int] = OrderedDict()
         version_mapping: OrderedDict[int, dict] = OrderedDict()
@@ -207,7 +294,7 @@ class AsyncSqliteDB:
                     continue
                 for row in results:
                     key, value = row
-                    runtime = pickle.loads(value)
+                    runtime = _safe_loads(value)
                     mapping[key] = runtime
             except (pickle.PickleError, sqlite3.Error) as e:
                 logger.exception("Cache error", exc_info=e)
@@ -224,7 +311,7 @@ class AsyncSqliteDB:
         async with self._lock:
             if not self._db:
                 _ensure_dir()
-                self._db = await aiosqlite.connect(CACHE_LOCATION)
+                self._db = await _async_connect()
 
             tables = {
                 "RuntimeCache_blocks_v3": block_mapping,
@@ -253,9 +340,16 @@ class AsyncSqliteDB:
 
 
 def _ensure_dir():
+    if CACHE_LOCATION == ":memory:":
+        return
     path = Path(CACHE_LOCATION).parent
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
+    # Narrow perms so other local users can't drop malicious pickle blobs in.
+    try:
+        os.chmod(path, 0o700)
+    except OSError as e:
+        logger.debug(f"could not chmod cache dir {path}: {e}")
 
 
 def _get_table_name(func):
@@ -303,7 +397,7 @@ def _retrieve_from_cache(c, table_name, key, chain):
         )
         result = c.fetchone()
         if result is not None:
-            return pickle.loads(result[0])
+            return _safe_loads(result[0])
     except (pickle.PickleError, sqlite3.Error) as e:
         logger.exception("Cache error", exc_info=e)
         pass
@@ -326,6 +420,7 @@ def _shared_inner_fn_logic(func, self, args, kwargs):
     if not (local_chain := _check_if_local(chain)) or not USE_CACHE:
         _ensure_dir()
         conn = sqlite3.connect(CACHE_LOCATION)
+        _restrict_db_perms(CACHE_LOCATION)
         c = conn.cursor()
         table_name = _get_table_name(func)
         _create_table(c, conn, table_name)

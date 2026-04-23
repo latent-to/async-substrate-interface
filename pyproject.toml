@@ -68,7 +68,7 @@ dev = [
     "pytest-mock==3.14.0",
     "pytest-split==0.10.0",
     "pytest-xdist==3.6.1",
-    "pytest-rerunfailures==10.2",
+    "pytest-rerunfailures>=14.0",
     "bittensor-wallet>=4.0.0",
     "pytest-forked",
     "mypy>=1.20.1",
