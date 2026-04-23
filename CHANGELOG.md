@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.1 /2025-04-23
+
+## What's Changed
+
+* Bump aiohttp from 3.13.3 to 3.13.4 by @dependabot[bot]
+  in https://github.com/latent-to/async-substrate-interface/pull/325
+* Improves the scalecodec conflict detected message by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/329
+* Restricts the pickling to certain classes by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/328
+
+## New Contributors
+
+* @dependabot[bot] made their first contribution in https://github.com/latent-to/async-substrate-interface/pull/325
+
+**Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.0...v2.0.1
+
 ## 2.0.0 /2025-04-21
 
 ### Breaking changes:
