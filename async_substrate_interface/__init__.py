@@ -14,9 +14,9 @@ def _check_conflicts():
             "Conflict detected: 'scalecodec' (py-scale-codec) is installed.\n"
             "This conflicts with 'cyscale', which uses the same namespace.\n\n"
             "Please remove it first:\n"
-            "    pip uninstall scalecodec\n\n"
+            "    pip uninstall scalecodec cyscale -y\n\n"
             "Then reinstall cyscale:\n"
-            "    pip install cyscale\n"
+            "    pip install cyscale --force-reinstall\n"
         )
     except importlib.metadata.PackageNotFoundError:
         pass  # Good — scalecodec is not installed
