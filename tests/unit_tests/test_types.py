@@ -76,7 +76,7 @@ async def test_runtime_cache_from_disk():
         # insert some fake data into our DB
         conn = sqlite3.connect(test_db_location)
         conn.execute(
-            "INSERT INTO RuntimeCache_blocks_v3 (key, value, chain) VALUES (?, ?, ?)",
+            "INSERT INTO RuntimeCache_blocks_v4 (key, value, chain) VALUES (?, ?, ?)",
             (fake_block, pickle.dumps(fake_hash), fake_chain),
         )
         conn.commit()
@@ -94,7 +94,7 @@ async def test_runtime_cache_from_disk():
         # verify that our added item is now in the DB
         conn = sqlite3.connect(test_db_location)
         cursor = conn.cursor()
-        cursor.execute("SELECT key, value, chain FROM RuntimeCache_blocks_v3")
+        cursor.execute("SELECT key, value, chain FROM RuntimeCache_blocks_v4")
         query = cursor.fetchall()
         cursor.close()
         conn.close()

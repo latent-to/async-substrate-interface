@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.2 /2025-04-24
+
+## What's Changed
+
+* use cyscale 0.3.1 by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/332
+
+**Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.1...v2.0.2
+
 ## 2.0.1 /2025-04-23
 
 ## What's Changed
