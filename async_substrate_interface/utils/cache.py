@@ -271,9 +271,9 @@ class AsyncSqliteDB:
         block_hash_mapping: OrderedDict[str, int] = OrderedDict()
         version_mapping: OrderedDict[int, dict] = OrderedDict()
         tables: dict[str, OrderedDict] = {
-            "RuntimeCache_blocks_v3": block_mapping,
-            "RuntimeCache_block_hashes_v3": block_hash_mapping,
-            "RuntimeCache_versions_v3": version_mapping,
+            "RuntimeCache_blocks_v4": block_mapping,
+            "RuntimeCache_block_hashes_v4": block_hash_mapping,
+            "RuntimeCache_versions_v4": version_mapping,
         }
         for table in tables.keys():
             async with self._lock:
@@ -314,9 +314,9 @@ class AsyncSqliteDB:
                 self._db = await _async_connect()
 
             tables = {
-                "RuntimeCache_blocks_v3": block_mapping,
-                "RuntimeCache_block_hashes_v3": block_hash_mapping,
-                "RuntimeCache_versions_v3": version_mapping,
+                "RuntimeCache_blocks_v4": block_mapping,
+                "RuntimeCache_block_hashes_v4": block_hash_mapping,
+                "RuntimeCache_versions_v4": version_mapping,
             }
             for table, mapping in tables.items():
                 local_chain = await self._create_if_not_exists(chain, table)
