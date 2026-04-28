@@ -470,6 +470,9 @@ def async_sql_lru_cache(maxsize: Optional[int] = None):
     return decorator
 
 
+_MISS = object()
+
+
 class LRUCache:
     """
     Basic Least-Recently-Used Cache, with simple methods `set` and `get`
@@ -486,12 +489,12 @@ class LRUCache:
         if len(self.cache) > self.max_size:
             self.cache.popitem(last=False)
 
-    def get(self, key):
+    def get(self, key, default=None):
         if key in self.cache:
             # Mark as recently used
             self.cache.move_to_end(key)
             return self.cache[key]
-        return None
+        return default
 
 
 class CachedFetcher:
@@ -559,7 +562,8 @@ class CachedFetcher:
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
         key = self.make_cache_key(args, kwargs)
 
-        if item := self._cache.get(key):
+        item = self._cache.get(key, _MISS)
+        if item is not _MISS:
             return item
 
         if key in self._inflight:
