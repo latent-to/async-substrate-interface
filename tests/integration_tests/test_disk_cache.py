@@ -26,7 +26,7 @@ async def test_disk_cache():
     async with DiskCachedAsyncSubstrateInterface(
         LATENT_LITE_ENTRYPOINT, ss58_format=42, chain_name="Bittensor"
     ) as disk_cached_substrate:
-        current_block = await disk_cached_substrate.get_block_number(None)
+        current_block = await disk_cached_substrate.get_block_number(None) - 5
         block_hash = await disk_cached_substrate.get_block_hash(current_block)
         parent_block_hash = await disk_cached_substrate.get_parent_block_hash(
             block_hash
