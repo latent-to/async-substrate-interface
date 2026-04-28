@@ -32,16 +32,16 @@ for _p in (_REPO_ROOT, _CY_SCALE_PATH):
 # Imports
 # ---------------------------------------------------------------------------
 
-from bt_decode import PortableRegistry
-from bt_decode import decode as bt_decode_one
-from bt_decode import decode_list as bt_decode_many
+from bt_decode import PortableRegistry  # noqa: E402
+from bt_decode import decode as bt_decode_one  # noqa: E402
+from bt_decode import decode_list as bt_decode_many  # noqa: E402
 
-import scalecodec
+import scalecodec  # noqa: E402
 
-from scalecodec.base import RuntimeConfigurationObject
-from scalecodec import ScaleBytes
-from scalecodec.type_registry import load_type_registry_preset
-from scalecodec.utils.ss58 import ss58_encode as _ss58_encode
+from scalecodec.base import RuntimeConfigurationObject  # noqa: E402
+from scalecodec import ScaleBytes  # noqa: E402
+from scalecodec.type_registry import load_type_registry_preset  # noqa: E402
+from scalecodec.utils.ss58 import ss58_encode as _ss58_encode  # noqa: E402
 
 print(f"scalecodec: {scalecodec.__file__}", flush=True)
 
@@ -373,21 +373,21 @@ def bench(fixture_path: str, iters: int):
             _ts_bare_list = [_ts_bare] * _synth_n
 
             _bt_old = run(
-                lambda ts=_ts_wrapped_list,
-                r=registry,
-                bl=_wrapped_bytes: bt_decode_many_with_ss58(ts, r, bl),
+                lambda ts=_ts_wrapped_list, r=registry, bl=_wrapped_bytes: (
+                    bt_decode_many_with_ss58(ts, r, bl)
+                ),
                 iters,
             )
             _bt_new = run(
-                lambda ts=_ts_bare_list,
-                r=registry,
-                bl=_bare_bytes: bt_decode_many_with_ss58(ts, r, bl),
+                lambda ts=_ts_bare_list, r=registry, bl=_bare_bytes: (
+                    bt_decode_many_with_ss58(ts, r, bl)
+                ),
                 iters,
             )
             _cy_old = run(
-                lambda ts=_ts_wrapped_list,
-                r=rc,
-                bl=_wrapped_bytes: cyscale_batch_decode(ts, r, bl),
+                lambda ts=_ts_wrapped_list, r=rc, bl=_wrapped_bytes: (
+                    cyscale_batch_decode(ts, r, bl)
+                ),
                 iters,
             )
             _cy_new = run(
