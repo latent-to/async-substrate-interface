@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.3 /2025-04-29
+
+## What's Changed
+
+* use cyscale 0.3.1 by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/332
+* Removes the potential of a None result. by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/335
+* Updates README regarding cyscale by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/334
+* Bumps cyscale + cache version by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/338
+
+**Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.1...v2.0.3
+
 ## 2.0.2 /2025-04-24
 
 ## What's Changed
