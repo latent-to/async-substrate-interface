@@ -470,9 +470,6 @@ def async_sql_lru_cache(maxsize: Optional[int] = None):
     return decorator
 
 
-_MISS = object()
-
-
 class LRUCache:
     """
     Basic Least-Recently-Used Cache, with simple methods `set` and `get`
@@ -489,12 +486,12 @@ class LRUCache:
         if len(self.cache) > self.max_size:
             self.cache.popitem(last=False)
 
-    def get(self, key, default=None):
+    def get(self, key):
         if key in self.cache:
             # Mark as recently used
             self.cache.move_to_end(key)
             return self.cache[key]
-        return default
+        return None
 
 
 class CachedFetcher:
@@ -562,8 +559,7 @@ class CachedFetcher:
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
         key = self.make_cache_key(args, kwargs)
 
-        item = self._cache.get(key, _MISS)
-        if item is not _MISS:
+        if (item := self._cache.get(key)) is not None:
             return item
 
         if key in self._inflight:
@@ -575,7 +571,12 @@ class CachedFetcher:
 
         try:
             result = await self._method(*args, **kwargs)
-            self._cache.set(key, result)
+            # Do not cache None: callers like `get_block_runtime_version_for`
+            # use it as an error/missing-result sentinel, and caching it would
+            # poison the cache against transient failures (rate limits, missing
+            # parent block during a reorg, etc.).
+            if result is not None:
+                self._cache.set(key, result)
             future.set_result(result)
             return result
         except Exception:

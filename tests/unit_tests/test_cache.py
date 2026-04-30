@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from unittest import mock
 
-from async_substrate_interface.utils.cache import CachedFetcher, LRUCache
+from async_substrate_interface.utils.cache import CachedFetcher
 
 
 @pytest.mark.asyncio
@@ -91,17 +91,15 @@ async def test_cached_fetcher_eviction():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("falsy_value", [0, None, "", False, [], {}])
-async def test_cached_fetcher_caches_falsy_values(falsy_value):
+@pytest.mark.parametrize("falsy_value", [0, "", False, [], {}])
+async def test_cached_fetcher_caches_non_none_falsy_values(falsy_value):
     """
-    Regression test: falsy values (0, None, "", False, ...) must be cached.
+    Regression test: falsy data values (0, "", False, [], {}) must be cached.
 
     Previously `CachedFetcher.__call__` used a truthiness check on the cache
     lookup, so any falsy stored value was indistinguishable from a miss and
-    the underlying method was re-invoked on every call. The most painful
-    real-world cases were `_cached_get_block_number` for the genesis block
-    (returns 0) and `get_block_runtime_version_for` on its error path
-    (returns None).
+    the underlying method was re-invoked on every call. The motivating real
+    case is `_cached_get_block_number` for the genesis block (returns 0).
     """
     mock_method = mock.AsyncMock(return_value=falsy_value)
     fetcher = CachedFetcher(max_size=2, method=mock_method)
@@ -114,13 +112,18 @@ async def test_cached_fetcher_caches_falsy_values(falsy_value):
     assert mock_method.await_count == 1
 
 
-def test_lru_cache_get_distinguishes_miss_from_cached_none():
-    """`LRUCache.get` must let callers distinguish a stored None from a miss."""
-    cache = LRUCache(max_size=2)
-    sentinel = object()
+@pytest.mark.asyncio
+async def test_cached_fetcher_does_not_cache_none():
+    """
+    `None` is used as an error/missing-result sentinel by callers like
+    `get_block_runtime_version_for`. It must NOT be cached, so transient
+    failures (rate limits, missing parent block during a reorg) can be
+    retried on the next call instead of returning a cached None forever.
+    """
+    mock_method = mock.AsyncMock(side_effect=[None, "real_value"])
+    fetcher = CachedFetcher(max_size=2, method=mock_method)
 
-    assert cache.get("missing", sentinel) is sentinel
-
-    cache.set("k", None)
-    assert cache.get("k", sentinel) is None
-    assert cache.get("k") is None  # default-None preserved for existing callers
+    assert await fetcher("key1") is None
+    # Second call must re-invoke the method, not return the cached None.
+    assert await fetcher("key1") == "real_value"
+    assert mock_method.await_count == 2
