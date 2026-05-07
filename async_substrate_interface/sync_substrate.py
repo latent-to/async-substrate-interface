@@ -28,6 +28,7 @@ from async_substrate_interface.errors import (
     BlockNotFound,
     MaxRetriesExceeded,
     StateDiscardedError,
+    StorageFunctionNotFound,
 )
 from async_substrate_interface.protocols import Keypair
 from async_substrate_interface.types import (
@@ -1649,7 +1650,7 @@ class SubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise SubstrateRequestException(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -2812,7 +2813,7 @@ class SubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise ValueError(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
