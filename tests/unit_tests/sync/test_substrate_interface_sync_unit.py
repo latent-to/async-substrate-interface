@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+from scalecodec.types import GenericCall
+
 from async_substrate_interface.sync_substrate import (
     SubstrateInterface,
     QueryMapResult,
@@ -166,6 +168,78 @@ class TestGetBlockNumber:
         substrate.runtime_cache.add_item.assert_called_once_with(
             block_hash="0xABC", block=100
         )
+
+
+def _make_mock_call():
+    call = object.__new__(GenericCall)
+    call.value = {
+        "call_function": "transfer_allow_death",
+        "call_module": "Balances",
+        "call_args": [],
+    }
+    return call
+
+
+def _make_mock_runtime_and_extrinsic():
+    extrinsic = MagicMock()
+    runtime = MagicMock()
+    runtime.metadata = {1: {1: {"extrinsic": {"version": 4}}}}
+    runtime.runtime_config.create_scale_object.return_value = extrinsic
+    runtime.runtime_config.get_decoder_class.return_value = None
+    return runtime, extrinsic
+
+
+def test_create_signed_extrinsic_uses_next_index_when_nonce_omitted():
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.runtime = runtime
+    substrate.runtime_config = runtime.runtime_config
+    substrate.init_runtime = MagicMock(return_value=runtime)
+    substrate.get_block_number = MagicMock(return_value=1)
+    substrate.get_account_next_index = MagicMock(return_value=7)
+    substrate.get_account_nonce = MagicMock(return_value=3)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    result = substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        signature=b"\x00" * 64,
+    )
+
+    assert result is extrinsic
+    substrate.get_account_next_index.assert_called_once_with(keypair.ss58_address)
+    substrate.get_account_nonce.assert_not_called()
+    extrinsic.encode.assert_called_once()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 7
+
+
+def test_create_signed_extrinsic_keeps_explicit_nonce():
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.runtime = runtime
+    substrate.runtime_config = runtime.runtime_config
+    substrate.init_runtime = MagicMock(return_value=runtime)
+    substrate.get_block_number = MagicMock(return_value=1)
+    substrate.get_account_next_index = MagicMock(return_value=7)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+
+    substrate.get_account_next_index.assert_not_called()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 11
 
 
 class TestExtrinsicReceiptProcessEvents:

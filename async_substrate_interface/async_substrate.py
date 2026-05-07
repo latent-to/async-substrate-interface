@@ -3101,7 +3101,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             keypair: Keypair used to sign the extrinsic
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
@@ -3124,7 +3124,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Retrieve nonce
         if nonce is None:
-            nonce = await self.get_account_nonce(keypair.ss58_address) or 0
+            nonce = await self.get_account_next_index(keypair.ss58_address) or 0
 
         # Process era
         if era is None:
@@ -3417,7 +3417,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         Args:
             account_address: SS58 formatted address
-            use_cache: If True, bypass local nonce cache and always request fresh value from RPC.
+            use_cache: If False, bypass local nonce cache and always request fresh value from RPC.
 
         Returns:
             Next index for the given account address
@@ -3534,7 +3534,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                      required
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
 
@@ -3914,7 +3914,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             max_weight: Maximum allowed weight to execute the call ( Uses `get_payment_info()` by default)
             era: Specify mortality in blocks in follow format: {'period': [amount_blocks]} If omitted the extrinsic is
                 immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
