@@ -9,6 +9,7 @@ from async_substrate_interface.async_substrate import (
     AsyncSubstrateInterface,
 )
 from async_substrate_interface.errors import SubstrateRequestException
+from scalecodec.types import GenericCall
 
 
 @pytest.mark.asyncio
@@ -244,6 +245,74 @@ async def test_get_account_next_index_bypass_mode_raises_on_rpc_error():
             "5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
             use_cache=False,
         )
+
+
+def _make_mock_call():
+    call = object.__new__(GenericCall)
+    call.value = {
+        "call_function": "transfer_allow_death",
+        "call_module": "Balances",
+        "call_args": [],
+    }
+    return call
+
+
+def _make_mock_runtime_and_extrinsic():
+    extrinsic = MagicMock()
+    runtime = MagicMock()
+    runtime.metadata = {1: {1: {"extrinsic": {"version": 4}}}}
+    runtime.runtime_config.create_scale_object.return_value = extrinsic
+    runtime.runtime_config.get_decoder_class.return_value = None
+    return runtime, extrinsic
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_uses_next_index_when_nonce_omitted():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.get_account_next_index = AsyncMock(return_value=7)
+    substrate.get_account_nonce = AsyncMock(return_value=3)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    result = await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        signature=b"\x00" * 64,
+    )
+
+    assert result is extrinsic
+    substrate.get_account_next_index.assert_awaited_once_with(keypair.ss58_address)
+    substrate.get_account_nonce.assert_not_awaited()
+    extrinsic.encode.assert_called_once()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 7
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_keeps_explicit_nonce():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.get_account_next_index = AsyncMock(return_value=7)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+
+    substrate.get_account_next_index.assert_not_awaited()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 11
 
 
 class TestAsyncExtrinsicReceiptProcessEvents:
