@@ -1,3 +1,5 @@
+import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, ANY
 
 import pytest
@@ -7,6 +9,7 @@ from async_substrate_interface.async_substrate import (
     AsyncExtrinsicReceipt,
     AsyncQueryMapResult,
     AsyncSubstrateInterface,
+    Websocket,
 )
 from async_substrate_interface.errors import SubstrateRequestException
 
@@ -244,6 +247,57 @@ async def test_get_account_next_index_bypass_mode_raises_on_rpc_error():
             "5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
             use_cache=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_websocket_requeues_replay_safe_inflight_rpc():
+    ws = Websocket("ws://localhost")
+    loop = asyncio.get_running_loop()
+    original_future = loop.create_future()
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "rpc-id",
+        "method": "chain_getHeader",
+        "params": [],
+    }
+    ws._inflight["rpc-id"] = json.dumps(payload)
+    ws._received["rpc-id"] = original_future
+    ws._in_use_ids.add("rpc-id")
+
+    await ws._requeue_replay_safe_inflight(loop)
+
+    assert "rpc-id" not in ws._inflight
+    assert ws._received["rpc-id"] is not original_future
+    assert ws._in_use_ids == {"rpc-id"}
+    assert await ws._sending.get() == payload
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["author_submitExtrinsic", "author_submitAndWatchExtrinsic"],
+)
+@pytest.mark.asyncio
+async def test_websocket_does_not_replay_non_idempotent_inflight_rpc(method):
+    ws = Websocket("ws://localhost")
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "rpc-id",
+        "method": method,
+        "params": ["0xdeadbeef"],
+    }
+    ws._inflight["rpc-id"] = json.dumps(payload)
+    ws._received["rpc-id"] = future
+    ws._in_use_ids.add("rpc-id")
+
+    await ws._requeue_replay_safe_inflight(loop)
+
+    assert "rpc-id" not in ws._inflight
+    assert ws._sending.empty()
+    assert "rpc-id" not in ws._in_use_ids
+    with pytest.raises(SubstrateRequestException, match=method):
+        future.result()
 
 
 class TestAsyncExtrinsicReceiptProcessEvents:
