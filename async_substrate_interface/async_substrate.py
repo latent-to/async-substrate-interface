@@ -47,6 +47,7 @@ from async_substrate_interface.errors import (
     ExtrinsicNotFound,
     BlockNotFound,
     StateDiscardedError,
+    StorageFunctionNotFound,
 )
 from async_substrate_interface.protocols import Keypair
 from async_substrate_interface.types import (
@@ -1383,6 +1384,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
     ):
         runtime = await self.init_runtime(block_hash=block_hash)
         metadata_pallet = runtime.metadata.get_metadata_pallet(module)
+        if metadata_pallet is None:
+            raise StorageFunctionNotFound(
+                f"Metadata pallet not found for module '{module}'"
+            )
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
@@ -2291,7 +2296,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
     async def get_extrinsics(
         self, block_hash: Optional[str] = None, block_number: Optional[int] = None
-    ) -> Optional[list["AsyncExtrinsicReceipt"]]:
+    ) -> Optional[list[GenericExtrinsic]]:
         """
         Return all extrinsics for given block_hash or block_number
 
@@ -2479,7 +2484,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise SubstrateRequestException(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -3754,7 +3759,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise ValueError(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
