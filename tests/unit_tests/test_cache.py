@@ -88,3 +88,42 @@ async def test_cached_fetcher_eviction():
     assert "key1" not in fetcher._cache.cache
     assert "key2" in fetcher._cache.cache
     assert "key3" in fetcher._cache.cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("falsy_value", [0, "", False, [], {}])
+async def test_cached_fetcher_caches_non_none_falsy_values(falsy_value):
+    """
+    Regression test: falsy data values (0, "", False, [], {}) must be cached.
+
+    Previously `CachedFetcher.__call__` used a truthiness check on the cache
+    lookup, so any falsy stored value was indistinguishable from a miss and
+    the underlying method was re-invoked on every call. The motivating real
+    case is `_cached_get_block_number` for the genesis block (returns 0).
+    """
+    mock_method = mock.AsyncMock(return_value=falsy_value)
+    fetcher = CachedFetcher(max_size=2, method=mock_method)
+
+    result1 = await fetcher("key1")
+    result2 = await fetcher("key1")
+
+    assert result1 == falsy_value
+    assert result2 == falsy_value
+    assert mock_method.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cached_fetcher_does_not_cache_none():
+    """
+    `None` is used as an error/missing-result sentinel by callers like
+    `get_block_runtime_version_for`. It must NOT be cached, so transient
+    failures (rate limits, missing parent block during a reorg) can be
+    retried on the next call instead of returning a cached None forever.
+    """
+    mock_method = mock.AsyncMock(side_effect=[None, "real_value"])
+    fetcher = CachedFetcher(max_size=2, method=mock_method)
+
+    assert await fetcher("key1") is None
+    # Second call must re-invoke the method, not return the cached None.
+    assert await fetcher("key1") == "real_value"
+    assert mock_method.await_count == 2
