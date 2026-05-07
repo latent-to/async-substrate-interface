@@ -95,6 +95,12 @@ ResultHandler = Callable[[dict, Any], Awaitable[tuple[dict, bool]]]
 
 logger = logging.getLogger("async_substrate_interface")
 raw_websocket_logger = logging.getLogger("raw_websocket")
+NON_REPLAYABLE_RPC_METHODS = frozenset(
+    {
+        "author_submitExtrinsic",
+        "author_submitAndWatchExtrinsic",
+    }
+)
 
 # env vars dictating the cache size of the cached methods
 SUBSTRATE_CACHE_METHOD_SIZE = int(os.getenv("SUBSTRATE_CACHE_METHOD_SIZE", "512"))
@@ -901,13 +907,7 @@ class Websocket:
                     f"Timeout occurred. Reconnecting. Attempt {self._attempts} of {self._max_retries}"
                 )
 
-            async with self._lock:
-                for original_id in list(self._inflight.keys()):
-                    payload = self._inflight.pop(original_id)
-                    self._received[original_id] = loop.create_future()
-                    to_send = json.loads(payload)
-                    logger.debug(f"Resubmitting {to_send['id']}")
-                    await self._sending.put(to_send)
+            await self._requeue_replay_safe_inflight(loop)
 
             logger.debug("Attempting reconnection...")
             await self.connect(True)
@@ -925,6 +925,43 @@ class Websocket:
                 "Ensure these are unsubscribed from before closing in the future."
             )
         return None
+
+    @staticmethod
+    def _is_replay_safe_payload(payload: dict) -> bool:
+        return payload.get("method") not in NON_REPLAYABLE_RPC_METHODS
+
+    @staticmethod
+    def _non_replayable_error(payload: dict) -> SubstrateRequestException:
+        method = payload.get("method", "<unknown>")
+        return SubstrateRequestException(
+            f"RPC request {method} was in-flight when the websocket connection "
+            "timed out or disconnected. The request may already have been "
+            "accepted by the node, so it will not be replayed automatically."
+        )
+
+    async def _requeue_replay_safe_inflight(self, loop: asyncio.AbstractEventLoop):
+        async with self._lock:
+            for original_id in list(self._inflight.keys()):
+                payload = self._inflight.pop(original_id)
+                to_send = json.loads(payload)
+
+                if not self._is_replay_safe_payload(to_send):
+                    logger.debug(
+                        "Refusing to replay non-idempotent in-flight RPC "
+                        f"{to_send.get('method')} with id {to_send.get('id')}"
+                    )
+                    future = self._received.get(original_id)
+                    if future is None:
+                        future = loop.create_future()
+                        self._received[original_id] = future
+                    if not future.done():
+                        future.set_exception(self._non_replayable_error(to_send))
+                    self._in_use_ids.discard(original_id)
+                    continue
+
+                self._received[original_id] = loop.create_future()
+                logger.debug(f"Resubmitting {to_send['id']}")
+                await self._sending.put(to_send)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.shutdown_timer is not None:
