@@ -2291,7 +2291,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
     async def get_extrinsics(
         self, block_hash: Optional[str] = None, block_number: Optional[int] = None
-    ) -> Optional[list["AsyncExtrinsicReceipt"]]:
+    ) -> Optional[list[GenericExtrinsic]]:
         """
         Return all extrinsics for given block_hash or block_number
 
