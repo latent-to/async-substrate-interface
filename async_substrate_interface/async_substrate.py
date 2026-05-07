@@ -1384,6 +1384,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
     ):
         runtime = await self.init_runtime(block_hash=block_hash)
         metadata_pallet = runtime.metadata.get_metadata_pallet(module)
+        if metadata_pallet is None:
+            raise StorageFunctionNotFound(
+                f"Metadata pallet not found for module '{module}'"
+            )
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
