@@ -45,6 +45,13 @@ PAGE_SIZE = 1_000
 
 DUMP_DIR = "/tmp/qmap_batches"
 
+# Page sizes to evaluate at bench time. The collected dump is flattened and
+# re-chunked into batches of this many entries (each batch = M keys + M
+# values), so you can experiment with different page sizes without re-running
+# `collect`. Set PAGE_SIZE to a large value (e.g. 1_000) for a fast collection;
+# rechunking only needs the total entry count to be >= max(BENCH_PAGE_SIZES).
+BENCH_PAGE_SIZES = [10, 100, 500, 1_000]
+
 # Used only to *predict* wall-clock under a hypothetical arrival schedule;
 # nothing actually sleeps for this long.
 PREDICTED_FIRST_ARRIVAL_SEC = 5.0
@@ -119,6 +126,47 @@ async def _open_runtime():
     return substrate, runtime.runtime_config
 
 
+def rechunk_batches(batches: list[dict], page_size: int) -> list[dict]:
+    """Flatten the collected per-page inputs and re-split them into batches of
+    `page_size` entries each (M keys + M values per batch).
+
+    A single `query_map` invocation produces uniform key_type and value_type
+    across all batches; the collected dump preserves the `[N keys; N values]`
+    structure per batch, which is what `decode_query_map` ultimately passes to
+    `batch_decode`. Rechunking here lets us model different page sizes without
+    re-running `collect`.
+    """
+    all_keys: list[bytes] = []
+    all_values: list[bytes] = []
+    key_type: str | None = None
+    value_type: str | None = None
+    for b in batches:
+        ts = b["type_strings"]
+        sb = b["scale_bytes_list"]
+        n = len(ts) // 2
+        if key_type is None:
+            key_type, value_type = ts[0], ts[n]
+        elif ts[0] != key_type or ts[n] != value_type:
+            raise ValueError(
+                "Mixed key/value types in dump; rechunk assumes a single query_map"
+            )
+        all_keys.extend(sb[:n])
+        all_values.extend(sb[n:])
+
+    out: list[dict] = []
+    for i in range(0, len(all_keys), page_size):
+        keys_chunk = all_keys[i : i + page_size]
+        values_chunk = all_values[i : i + page_size]
+        m = len(keys_chunk)
+        out.append(
+            {
+                "type_strings": [key_type] * m + [value_type] * m,
+                "scale_bytes_list": keys_chunk + values_chunk,
+            }
+        )
+    return out
+
+
 def time_concatenated_decode(rc, batches) -> float:
     """Time a single `batch_decode` over the concatenation of every batch's
     inputs — what the old code does after all responses arrive."""
@@ -145,52 +193,58 @@ def time_per_batch_decodes(rc, batches) -> list[float]:
 
 async def bench() -> None:
     batches = load_batches()
-    sizes = [len(b["type_strings"]) for b in batches]
-    print(
-        f"Loaded {len(batches)} batches; items/batch "
-        f"min={min(sizes)} max={max(sizes)} total={sum(sizes)}"
-    )
+    total_entries = sum(len(b["type_strings"]) for b in batches) // 2
+    print(f"Loaded {len(batches)} collected batches; total entries={total_entries}")
 
     substrate, rc = await _open_runtime()
     try:
-        concat_runs = [time_concatenated_decode(rc, batches) for _ in range(RUNS)]
-        per_batch_runs = [time_per_batch_decodes(rc, batches) for _ in range(RUNS)]
+        for page_size in BENCH_PAGE_SIZES:
+            if page_size > total_entries:
+                print(
+                    f"\nSkipping page_size={page_size}: only {total_entries} entries in dump."
+                )
+                continue
+            rechunked = rechunk_batches(batches, page_size)
+            n = len(rechunked)
+            stagger_sec = PREDICTED_STAGGER_MS / 1000.0
+            network_tail = PREDICTED_FIRST_ARRIVAL_SEC + (n - 1) * stagger_sec
+
+            concat_runs = [time_concatenated_decode(rc, rechunked) for _ in range(RUNS)]
+            per_batch_runs = [
+                time_per_batch_decodes(rc, rechunked) for _ in range(RUNS)
+            ]
+            d_total = statistics.median(concat_runs)
+            per_batch_medians = [
+                statistics.median(times) for times in zip(*per_batch_runs)
+            ]
+            d_per_batch_sum = sum(per_batch_medians)
+            d_last = per_batch_medians[-1]
+            d_max = max(per_batch_medians)
+
+            old_wall = network_tail + d_total
+            new_wall = network_tail + d_last
+
+            print()
+            print(f"=== page_size={page_size} ({n} pages) ===")
+            print(f"  D_total (one concat decode):    {d_total * 1000:.1f}ms")
+            print(f"  Σ per-batch decode:             {d_per_batch_sum * 1000:.1f}ms")
+            print(
+                f"  per-batch max / last:           {d_max * 1000:.1f}ms / {d_last * 1000:.1f}ms"
+            )
+            print(
+                f"  predicted wall @ first={PREDICTED_FIRST_ARRIVAL_SEC:.1f}s, "
+                f"stagger={PREDICTED_STAGGER_MS:.0f}ms:"
+            )
+            print(f"    old:     {old_wall:.3f}s")
+            print(f"    new:     {new_wall:.3f}s")
+            print(f"    speedup: {old_wall - new_wall:.3f}s")
+            if stagger_sec <= d_max:
+                print(
+                    "    WARNING: stagger <= max per-batch decode; decodes back "
+                    "up and the prediction above understates new's wall clock."
+                )
     finally:
         await substrate.close()
-
-    d_total = statistics.median(concat_runs)
-    per_batch_medians = [statistics.median(times) for times in zip(*per_batch_runs)]
-    d_per_batch_sum = sum(per_batch_medians)
-    d_last = per_batch_medians[-1]
-    d_max = max(per_batch_medians)
-
-    print()
-    print("--- decode CPU (medians across runs) ---")
-    print(f"  single concatenated decode (old):    {d_total * 1000:.1f}ms")
-    print(f"  per-batch decode total (new):        {d_per_batch_sum * 1000:.1f}ms")
-    print(f"  per-batch decode max:                {d_max * 1000:.1f}ms")
-    print(f"  per-batch decode last (final batch): {d_last * 1000:.1f}ms")
-
-    # Predicted wall clock under the configured arrival schedule. The
-    # tail-after-last-arrival is what differs between strategies.
-    network_tail = PREDICTED_FIRST_ARRIVAL_SEC + (len(batches) - 1) * (
-        PREDICTED_STAGGER_MS / 1000.0
-    )
-    old_wall = network_tail + d_total
-    new_wall = network_tail + d_last  # assumes stagger > d_max; verified below
-    print()
-    print(
-        f"--- predicted wall-clock @ first_arrival="
-        f"{PREDICTED_FIRST_ARRIVAL_SEC:.2f}s, stagger={PREDICTED_STAGGER_MS:.0f}ms ---"
-    )
-    print(f"  old: {old_wall:.3f}s")
-    print(f"  new: {new_wall:.3f}s")
-    print(f"  speedup: {old_wall - new_wall:.3f}s")
-    if PREDICTED_STAGGER_MS / 1000.0 <= d_max:
-        print(
-            "  WARNING: stagger <= max per-batch decode; decodes back up "
-            "and the prediction above understates new's wall clock."
-        )
 
 
 # ---------- entry ----------
