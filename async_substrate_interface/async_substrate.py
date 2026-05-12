@@ -2584,7 +2584,26 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
         runtime: Optional[Runtime] = None,
+        result_processor: Optional[Callable[[dict, str | int], Any]] = None,
     ) -> RequestResults:
+        """
+        Sends a batch of RPC payloads over the websocket and gathers their responses, optionally decoding
+        them, handling them as subscriptions, or post-processing them as they arrive.
+
+        Args:
+            payloads: list of payload dicts (as produced by `make_payload`) to send; ids must be unique
+            value_scale_type: Scale Type string used for decoding ScaleBytes results
+            storage_item: The ScaleType object used for decoding ScaleBytes results
+            result_handler: the result handler coroutine function used for handling longer-running subscriptions
+            runtime: Optional Runtime to use for decoding. If not specified, the currently-loaded `self.runtime` is used
+            result_processor: optional synchronous callable invoked per non-subscription response as soon as it
+                arrives, receiving `(response, item_id)`; its return value replaces the raw response stored in
+                the result map. Lets callers overlap CPU-bound post-processing (e.g. SCALE decoding) with the
+                network wait for the remaining payloads. Mutually exclusive with `result_handler`.
+
+        Returns:
+            mapping of payload id to the list of (possibly processed) responses received for that request
+        """
         request_manager = RequestManager(payloads)
 
         if len(set(x["id"] for x in payloads)) != len(payloads):
@@ -2641,6 +2660,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
                                 result_handler,
                                 runtime=runtime,
                             )
+                            if (
+                                result_processor is not None
+                                and not asyncio.iscoroutinefunction(result_handler)
+                            ):
+                                decoded_response = result_processor(
+                                    decoded_response, item_id
+                                )
                             request_manager.add_response(
                                 item_id, decoded_response, complete
                             )
@@ -3833,51 +3859,46 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     ignore_decoding_errors,
                 )
             else:
-                # storage item and value scale type are not included here because this is batch-decoded in rust
+                # Each batch is decoded via ``result_processor`` as soon as
+                # its response lands, overlapping CPU-bound cyscale decoding
+                # with the network wait for the remaining batches.
                 page_batches = [
                     result_keys[i : i + page_size]
                     for i in range(0, len(result_keys), page_size)
                 ]
-                changes = []
-                payloads = []
-                for idx, page_batch in enumerate(page_batches):
-                    payloads.append(
-                        self.make_payload(
-                            str(idx), "state_queryStorageAt", [page_batch, block_hash]
-                        )
+                payloads = [
+                    self.make_payload(
+                        str(idx), "state_queryStorageAt", [page_batch, block_hash]
                     )
+                    for idx, page_batch in enumerate(page_batches)
+                ]
+
+                def process_batch(response_: dict, _item_id) -> list:
+                    if "error" in response_:
+                        raise SubstrateRequestException(response_["error"]["message"])
+                    if "result" not in response_:
+                        raise SubstrateRequestException(response_)
+                    batch_changes = []
+                    for result_group_ in response_["result"]:
+                        batch_changes.extend(result_group_["changes"])
+                    return decode_query_map(
+                        batch_changes,
+                        prefix,
+                        runtime,
+                        param_types,
+                        params,
+                        value_type,
+                        key_hashers,
+                        ignore_decoding_errors,
+                    )
+
                 results: RequestResults = await self._make_rpc_request(
-                    payloads, runtime=runtime
+                    payloads, runtime=runtime, result_processor=process_batch
                 )
-                for result_ in results.values():
-                    res = result_[0]
-                    if "error" in res:
-                        err_msg = res["error"]["message"]
-                        if (
-                            "Client error: Api called for an unknown Block: State already discarded"
-                            in err_msg
-                        ):
-                            bh = err_msg.split("State already discarded for ")[
-                                1
-                            ].strip()
-                            raise StateDiscardedError(bh)
-                        else:
-                            raise SubstrateRequestException(err_msg)
-                    elif "result" not in res:
-                        raise SubstrateRequestException(res)
-                    else:
-                        for result_group in res["result"]:
-                            changes.extend(result_group["changes"])
-                result = decode_query_map(
-                    changes,
-                    prefix,
-                    runtime,
-                    param_types,
-                    params,
-                    value_type,
-                    key_hashers,
-                    ignore_decoding_errors,
-                )
+                result = []
+                for processed in results.values():
+                    # processed is a one-element list containing the decoded batch
+                    result.extend(processed[0])
         return AsyncQueryMapResult(
             records=result,
             page_size=page_size,

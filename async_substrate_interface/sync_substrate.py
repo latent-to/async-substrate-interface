@@ -2834,7 +2834,6 @@ class SubstrateInterface(SubstrateMixin):
             )
 
         # Generate storage key prefix
-        # TODO should this use raw storage keys if necessary?
         storage_key = StorageKey.create_from_storage_function(
             module,
             storage_item.value["name"],
