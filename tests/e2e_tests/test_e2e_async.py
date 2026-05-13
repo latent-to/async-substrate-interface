@@ -2,6 +2,7 @@ import asyncio
 import time
 import tracemalloc
 
+from bittensor_wallet.keypair import Keypair
 import pytest_asyncio
 import pytest
 from websockets.protocol import State
@@ -794,3 +795,45 @@ async def test_memory_leak():
             f"Loop {i}: diff={total_diff / 1024:.2f} KiB, current={current / 1024:.2f} KiB, "
             f"peak={peak / 1024:.2f} KiB"
         )
+
+
+@pytest.mark.asyncio
+async def test_get_payment_info(substrate):
+    """
+    This exists in e2e and not in integration like its sync version due to the discrepancy
+    between the get_next_account_index cache in the two.
+    """
+    print("Testing test_get_payment_info")
+    alice_coldkey = Keypair.create_from_uri("//Alice")
+    bob_coldkey = Keypair.create_from_uri("//Bob")
+    block_hash = await substrate.get_chain_head()
+    call = await substrate.compose_call(
+        "Balances",
+        "transfer_keep_alive",
+        {"dest": bob_coldkey.ss58_address, "value": 100_000},
+        block_hash,
+    )
+    payment_info = await substrate.get_payment_info(
+        call=call,
+        keypair=alice_coldkey,
+    )
+    partial_fee_no_era = payment_info["partial_fee"]
+    assert partial_fee_no_era > 0
+    payment_info_era = await substrate.get_payment_info(
+        call=call, keypair=alice_coldkey, era={"period": 64}
+    )
+    partial_fee_era = payment_info_era["partial_fee"]
+    assert partial_fee_era > partial_fee_no_era
+
+    payment_info_all_options = await substrate.get_payment_info(
+        call=call,
+        keypair=alice_coldkey,
+        era={"period": 64},
+        nonce=await substrate.get_account_next_index(alice_coldkey.ss58_address),
+        tip=5_000_000,
+        tip_asset_id=64,
+    )
+    partial_fee_all_options = payment_info_all_options["partial_fee"]
+    assert partial_fee_all_options > partial_fee_no_era
+    assert partial_fee_all_options > partial_fee_era
+    print("test_get_payment_info succeeded")
