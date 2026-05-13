@@ -3036,12 +3036,15 @@ class SubstrateInterface(SubstrateMixin):
                 the subscription is completed.
             """
             # Check if extrinsic is included and finalized
-            if "params" in message and isinstance(message["params"]["result"], dict):
+            if "params" in message and isinstance(
+                message["params"]["result"], (dict, str)
+            ):
                 # Convert result enum to lower for backwards compatibility
-                message_result = {
-                    k.lower(): v for k, v in message["params"]["result"].items()
-                }
-
+                msg_result = message["params"]["result"]
+                if isinstance(msg_result, dict):
+                    message_result = {k.lower(): v for k, v in msg_result.items()}
+                else:
+                    message_result = {msg_result: msg_result}
                 # check for any subscription indicators of failure
                 failure_message = None
                 if "usurped" in message_result:
