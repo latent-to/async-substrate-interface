@@ -13,7 +13,7 @@ on:
     branches:
       - staging
       - master
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [ opened, synchronize, reopened, labeled, unlabeled ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -109,7 +109,7 @@ jobs:
         run: docker save -o subtensor-localnet.tar ghcr.io/opentensor/subtensor-localnet:devnet-ready
 
       - name: Upload Docker Image as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: subtensor-localnet
           path: subtensor-localnet.tar
@@ -190,7 +190,7 @@ jobs:
           uv pip install --system '.[dev]'
 
       - name: Download Cached Docker Image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: subtensor-localnet
 
@@ -216,12 +216,12 @@ jobs:
           sudo apt-get install -y clang curl libssl-dev llvm libudev-dev protobuf-compiler
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.0.0
 
       - name: Clone async-substrate-interface repo
         run: git clone https://github.com/latent-to/async-substrate-interface.git

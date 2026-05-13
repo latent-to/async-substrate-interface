@@ -13,7 +13,7 @@ on:
     branches:
       - staging
       - master
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [ opened, synchronize, reopened, labeled, unlabeled ]
 
   workflow_dispatch:
     inputs:
@@ -119,8 +119,8 @@ jobs:
 
   pull-docker-image:
     needs:
-       - check-labels
-       - find-e2e-tests
+      - check-labels
+      - find-e2e-tests
 
     runs-on: ubuntu-latest
     if: always() && needs.check-labels.outputs.run-sdk-tests == 'true'
@@ -135,7 +135,7 @@ jobs:
         run: docker save -o subtensor-localnet.tar ghcr.io/opentensor/subtensor-localnet:devnet-ready
 
       - name: Upload Docker Image as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: subtensor-localnet
           path: subtensor-localnet.tar
@@ -222,7 +222,7 @@ jobs:
           uv pip install --system '.[dev]'
 
       - name: Download Cached Docker Image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: subtensor-localnet
 
@@ -248,7 +248,7 @@ jobs:
           sudo apt-get install -y clang curl libssl-dev llvm libudev-dev protobuf-compiler
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
