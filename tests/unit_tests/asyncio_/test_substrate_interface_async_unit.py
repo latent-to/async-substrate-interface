@@ -122,6 +122,66 @@ async def test_async_query_map_result_retrieve_all_records():
     assert mock_substrate.query_map.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_async_query_map_result_honors_max_results():
+    """Iteration must stop at max_results, even when the buffer/pages hold more."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+    page2 = [("k4", "v4"), ("k5", "v5")]
+
+    mock_substrate = MagicMock()
+    qm = AsyncQueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=4,
+    )
+
+    # Next page should only be fetched once; iteration must halt at max_results=4
+    # without ever exhausting page2.
+    page2_result = AsyncQueryMapResult(
+        records=list(page2),
+        page_size=3,
+        substrate=mock_substrate,
+        last_key="k5",
+    )
+    mock_substrate.query_map = AsyncMock(return_value=page2_result)
+
+    collected = []
+    async for item in qm:
+        collected.append(item)
+
+    assert collected == page1 + page2[:1]
+    assert len(collected) == 4
+    assert mock_substrate.query_map.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_query_map_result_max_results_stops_within_initial_buffer():
+    """When max_results is below the initial page size, no further pages are fetched."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+
+    mock_substrate = MagicMock()
+    mock_substrate.query_map = AsyncMock()
+
+    qm = AsyncQueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=2,
+    )
+
+    collected = [item async for item in qm]
+
+    assert collected == page1[:2]
+    mock_substrate.query_map.assert_not_awaited()
+
+
 class TestGetBlockHash:
     @pytest.fixture
     def substrate(self):

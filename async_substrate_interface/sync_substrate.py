@@ -398,6 +398,7 @@ class QueryMapResult:
         self.ignore_decoding_errors = ignore_decoding_errors
         self.loading_complete = False
         self._buffer = iter(self.records)  # Initialize the buffer with initial records
+        self._records_returned = 0
 
     def retrieve_next_page(self, start_key) -> list:
         assert self.module is not None
@@ -435,6 +436,9 @@ class QueryMapResult:
         return self
 
     def get_next_record(self):
+        if self.max_results is not None and self._records_returned >= self.max_results:
+            self.loading_complete = True
+            return False, None
         try:
             # Try to get the next record from the buffer
             record = next(self._buffer)
@@ -442,6 +446,7 @@ class QueryMapResult:
             # If no more records in the buffer
             return False, None
         else:
+            self._records_returned += 1
             return True, record
 
     def __next__(self):
@@ -463,7 +468,10 @@ class QueryMapResult:
         self.records.extend(next_page)
         # Update the buffer with the newly fetched records
         self._buffer = iter(next_page)
-        return next(self._buffer)
+        successfully_retrieved, record = self.get_next_record()
+        if successfully_retrieved:
+            return record
+        raise StopIteration
 
     def __getitem__(self, item):
         return self.records[item]
@@ -2857,6 +2865,8 @@ class SubstrateInterface(SubstrateMixin):
         )
 
         result_keys = response.get("result", [])
+        if max_results is not None:
+            result_keys = result_keys[:max_results]
 
         result = []
         last_key = None
