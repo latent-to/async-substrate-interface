@@ -1,6 +1,31 @@
 # Changelog
 
-## 2.0.3 /2025-04-29
+## 2.0.4 /2026-05-13
+
+## What's Changed
+
+* Bumps wheel for CVE-2026-24049 by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/340
+* Bump pytest for consistency with bittensor by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/343
+* Raises correct exception for Storage Function Not Found by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/342
+* Fixes return type hint for `get_extrinsics` by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/341
+* Bumps workflow versions by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/351
+* Batches the query_map decoding during fully_exhaust=True. by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/349
+* Respects max_results in query_map results by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/350
+* fix:auto-signed extrinsics to use account_nextIndex by @zeus1959
+  in https://github.com/latent-to/async-substrate-interface/pull/345
+
+## New Contributors
+
+* @zeus1959 made their first contribution in https://github.com/latent-to/async-substrate-interface/pull/345
+
+**Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.3...v2.0.4
+
+## 2.0.3 /2026-04-29
 
 ## What's Changed
 
@@ -12,7 +37,7 @@
 
 **Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.1...v2.0.3
 
-## 2.0.2 /2025-04-24
+## 2.0.2 /2026-04-24
 
 ## What's Changed
 
@@ -20,7 +45,7 @@
 
 **Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.1...v2.0.2
 
-## 2.0.1 /2025-04-23
+## 2.0.1 /2026-04-23
 
 ## What's Changed
 
@@ -37,7 +62,7 @@
 
 **Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.0.0...v2.0.1
 
-## 2.0.0 /2025-04-21
+## 2.0.0 /2026-04-21
 
 ### Breaking changes:
 
@@ -85,7 +110,7 @@ pip uninstall scalecodec -y
 pip install -U cyscale 
 ```
 
-## 1.6.4 /2025-03-25
+## 1.6.4 /2026-03-25
 
 ## What's Changed
 
@@ -100,7 +125,7 @@ pip install -U cyscale 
 
 **Full Changelog**: https://github.com/opentensor/async-substrate-interface/compare/v1.6.3...v1.6.4
 
-## 1.6.3 /2025-02-24
+## 1.6.3 /2026-02-24
 
 ## What's Changed
 
@@ -111,7 +136,7 @@ pip install -U cyscale 
 
 **Full Changelog**: https://github.com/opentensor/async-substrate-interface/compare/v1.6.2...v1.6.3
 
-## 1.6.2 /2025-02-19
+## 1.6.2 /2026-02-19
 
 ## What's Changed
 
@@ -125,7 +150,7 @@ pip install -U cyscale 
 
 **Full Changelog**: https://github.com/opentensor/async-substrate-interface/compare/v1.6.1...v1.6.2
 
-## 1.6.1 /2025-02-03
+## 1.6.1 /2026-02-03
 
 * RuntimeCache updates by @thewhaleking in https://github.com/opentensor/async-substrate-interface/pull/260
 * fix memory leak by @thewhaleking in https://github.com/opentensor/async-substrate-interface/pull/261
@@ -134,7 +159,7 @@ pip install -U cyscale 
 
 **Full Changelog**: https://github.com/opentensor/async-substrate-interface/compare/v1.6.0...v1.6.1
 
-## 1.6.0 /2025-01-27
+## 1.6.0 /2026-01-27
 
 * Fix typo by @thewhaleking in https://github.com/opentensor/async-substrate-interface/pull/258
 * Improve Disk Caching by @thewhaleking in https://github.com/opentensor/async-substrate-interface/pull/227
