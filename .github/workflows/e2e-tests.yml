@@ -62,9 +62,9 @@ jobs:
           else
             labels=""
           fi
-    
+          
           image=""
-    
+          
           for label in $labels; do
             echo "Found label: $label"
             case "$label" in
@@ -82,7 +82,7 @@ jobs:
                 ;;
             esac
           done
-    
+          
           if [[ -z "$image" ]]; then
             # fallback to default based on branch
             if [[ "${GITHUB_REF_NAME}" == "master" ]]; then
@@ -91,7 +91,7 @@ jobs:
               image="ghcr.io/opentensor/subtensor-localnet:devnet-ready"
             fi
           fi
-    
+          
           echo "✅ Final selected image: $image"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
@@ -105,7 +105,7 @@ jobs:
         run: docker save -o subtensor-localnet.tar ${{ steps.set-image.outputs.image }}
 
       - name: Upload Docker Image as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: subtensor-localnet
           path: subtensor-localnet.tar
@@ -125,13 +125,13 @@ jobs:
         os:
           - ubuntu-latest
         test-file: ${{ fromJson(needs.find-tests.outputs.test-files) }}
-        python-version: ["3.10", "3.14"]  # Only run on oldest and latest supported versions
+        python-version: [ "3.10", "3.14" ]  # Only run on oldest and latest supported versions
     steps:
       - name: Check-out repository
         uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -143,7 +143,7 @@ jobs:
           uv sync --extra dev --dev
 
       - name: Download Cached Docker Image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: subtensor-localnet
 
