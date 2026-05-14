@@ -3162,7 +3162,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # Retrieve nonce
         if nonce is None:
             nonce = await self.get_account_next_index(keypair.ss58_address) or 0
-        else:
+        elif not _skip_cache_update:
             async with self._lock:
                 self._nonces[keypair.ss58_address] = nonce
 
@@ -3617,6 +3617,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,
+            _skip_cache_update=True,
         )
         assert extrinsic.data is not None
         extrinsic_len = len(extrinsic.data)
