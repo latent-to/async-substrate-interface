@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+from scalecodec.types import GenericCall
+
 from async_substrate_interface.sync_substrate import (
     SubstrateInterface,
     QueryMapResult,
@@ -100,6 +102,62 @@ def test_async_query_map_result_retrieve_all_records():
     assert mock_substrate.query_map.call_count == 2
 
 
+def test_query_map_result_honors_max_results():
+    """Iteration must stop at max_results, even when the buffer/pages hold more."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+    page2 = [("k4", "v4"), ("k5", "v5")]
+
+    mock_substrate = MagicMock()
+    qm = QueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=4,
+    )
+
+    # Next page should only be fetched once; iteration must halt at max_results=4
+    # without ever exhausting page2.
+    page2_result = QueryMapResult(
+        records=list(page2),
+        page_size=3,
+        substrate=mock_substrate,
+        last_key="k5",
+    )
+    mock_substrate.query_map = MagicMock(return_value=page2_result)
+
+    collected = list(qm)
+
+    assert collected == page1 + page2[:1]
+    assert len(collected) == 4
+    assert mock_substrate.query_map.call_count == 1
+
+
+def test_query_map_result_max_results_stops_within_initial_buffer():
+    """When max_results is below the initial page size, no further pages are fetched."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+
+    mock_substrate = MagicMock()
+    mock_substrate.query_map = MagicMock()
+
+    qm = QueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=2,
+    )
+
+    collected = list(qm)
+
+    assert collected == page1[:2]
+    mock_substrate.query_map.assert_not_called()
+
+
 class TestGetBlockHash:
     def _make_substrate(self):
         s = SubstrateInterface("ws://localhost", _mock=True)
@@ -166,6 +224,78 @@ class TestGetBlockNumber:
         substrate.runtime_cache.add_item.assert_called_once_with(
             block_hash="0xABC", block=100
         )
+
+
+def _make_mock_call():
+    call = object.__new__(GenericCall)
+    call.value = {
+        "call_function": "transfer_allow_death",
+        "call_module": "Balances",
+        "call_args": [],
+    }
+    return call
+
+
+def _make_mock_runtime_and_extrinsic():
+    extrinsic = MagicMock()
+    runtime = MagicMock()
+    runtime.metadata = {1: {1: {"extrinsic": {"version": 4}}}}
+    runtime.runtime_config.create_scale_object.return_value = extrinsic
+    runtime.runtime_config.get_decoder_class.return_value = None
+    return runtime, extrinsic
+
+
+def test_create_signed_extrinsic_uses_next_index_when_nonce_omitted():
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.runtime = runtime
+    substrate.runtime_config = runtime.runtime_config
+    substrate.init_runtime = MagicMock(return_value=runtime)
+    substrate.get_block_number = MagicMock(return_value=1)
+    substrate.get_account_next_index = MagicMock(return_value=7)
+    substrate.get_account_nonce = MagicMock(return_value=3)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    result = substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        signature=b"\x00" * 64,
+    )
+
+    assert result is extrinsic
+    substrate.get_account_next_index.assert_called_once_with(keypair.ss58_address)
+    substrate.get_account_nonce.assert_not_called()
+    extrinsic.encode.assert_called_once()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 7
+
+
+def test_create_signed_extrinsic_keeps_explicit_nonce():
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.runtime = runtime
+    substrate.runtime_config = runtime.runtime_config
+    substrate.init_runtime = MagicMock(return_value=runtime)
+    substrate.get_block_number = MagicMock(return_value=1)
+    substrate.get_account_next_index = MagicMock(return_value=7)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+
+    substrate.get_account_next_index.assert_not_called()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 11
 
 
 class TestExtrinsicReceiptProcessEvents:

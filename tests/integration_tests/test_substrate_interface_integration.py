@@ -74,11 +74,9 @@ def test_query_map_with_odd_number_of_params():
     print("test_query_map_with_odd_number_of_params succeeded")
 
 
-def test_get_payment_info():
+def test_get_payment_info(bob_coldkey, alice_coldkey):
     print("Testing test_get_payment_info")
     substrate = get_mock_substrate("test_get_payment_info")
-    alice_coldkey = bittensor_wallet.Keypair.create_from_uri("//Alice")
-    bob_coldkey = bittensor_wallet.Keypair.create_from_uri("//Bob")
     block_hash = substrate.get_chain_head()
     call = substrate.compose_call(
         "Balances",

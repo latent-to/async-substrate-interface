@@ -28,6 +28,7 @@ from async_substrate_interface.errors import (
     BlockNotFound,
     MaxRetriesExceeded,
     StateDiscardedError,
+    StorageFunctionNotFound,
 )
 from async_substrate_interface.protocols import Keypair
 from async_substrate_interface.types import (
@@ -397,6 +398,7 @@ class QueryMapResult:
         self.ignore_decoding_errors = ignore_decoding_errors
         self.loading_complete = False
         self._buffer = iter(self.records)  # Initialize the buffer with initial records
+        self._records_returned = 0
 
     def retrieve_next_page(self, start_key) -> list:
         assert self.module is not None
@@ -434,6 +436,9 @@ class QueryMapResult:
         return self
 
     def get_next_record(self):
+        if self.max_results is not None and self._records_returned >= self.max_results:
+            self.loading_complete = True
+            return False, None
         try:
             # Try to get the next record from the buffer
             record = next(self._buffer)
@@ -441,6 +446,7 @@ class QueryMapResult:
             # If no more records in the buffer
             return False, None
         else:
+            self._records_returned += 1
             return True, record
 
     def __next__(self):
@@ -462,7 +468,10 @@ class QueryMapResult:
         self.records.extend(next_page)
         # Update the buffer with the newly fetched records
         self._buffer = iter(next_page)
-        return next(self._buffer)
+        successfully_retrieved, record = self.get_next_record()
+        if successfully_retrieved:
+            return record
+        raise StopIteration
 
     def __getitem__(self, item):
         return self.records[item]
@@ -635,6 +644,10 @@ class SubstrateInterface(SubstrateMixin):
         self.init_runtime(block_hash=block_hash)
         assert self.runtime is not None
         metadata_pallet = self.runtime.metadata.get_metadata_pallet(module)
+        if metadata_pallet is None:
+            raise StorageFunctionNotFound(
+                f"Metadata pallet not found for module '{module}'"
+            )
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
@@ -1489,7 +1502,7 @@ class SubstrateInterface(SubstrateMixin):
 
     def get_extrinsics(
         self, block_hash: Optional[str] = None, block_number: Optional[int] = None
-    ) -> Optional[list["ExtrinsicReceipt"]]:
+    ) -> Optional[list[GenericExtrinsic]]:
         """
         Return all extrinsics for given block_hash or block_number
 
@@ -1649,7 +1662,7 @@ class SubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise SubstrateRequestException(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -2234,7 +2247,7 @@ class SubstrateInterface(SubstrateMixin):
             keypair: Keypair used to sign the extrinsic
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
@@ -2258,7 +2271,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Retrieve nonce
         if nonce is None:
-            nonce = self.get_account_nonce(keypair.ss58_address) or 0
+            nonce = self.get_account_next_index(keypair.ss58_address)
 
         # Process era
         if era is None:
@@ -2600,7 +2613,7 @@ class SubstrateInterface(SubstrateMixin):
                      required
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
 
@@ -2619,6 +2632,9 @@ class SubstrateInterface(SubstrateMixin):
 
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
+
+        if nonce is None:
+            nonce = self.get_account_next_index(keypair.ss58_address)
 
         # Create extrinsic
         extrinsic = self.create_signed_extrinsic(
@@ -2812,7 +2828,7 @@ class SubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise ValueError(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -2829,7 +2845,6 @@ class SubstrateInterface(SubstrateMixin):
             )
 
         # Generate storage key prefix
-        # TODO should this use raw storage keys if necessary?
         storage_key = StorageKey.create_from_storage_function(
             module,
             storage_item.value["name"],
@@ -2853,6 +2868,8 @@ class SubstrateInterface(SubstrateMixin):
         )
 
         result_keys = response.get("result", [])
+        if max_results is not None:
+            result_keys = result_keys[:max_results]
 
         result = []
         last_key = None
@@ -2912,7 +2929,7 @@ class SubstrateInterface(SubstrateMixin):
             max_weight: Maximum allowed weight to execute the call ( Uses `get_payment_info()` by default)
             era: Specify mortality in blocks in follow format: {'period': [amount_blocks]} If omitted the extrinsic is
                 immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
@@ -3005,7 +3022,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Check requirements
         if not isinstance(extrinsic, GenericExtrinsic):
-            raise TypeError("'extrinsic' must be of type Extrinsics")
+            raise TypeError("'extrinsic' must be of type Extrinsic")
 
         def result_handler(message: dict, subscription_id) -> tuple[dict, bool]:
             """
@@ -3022,12 +3039,15 @@ class SubstrateInterface(SubstrateMixin):
                 the subscription is completed.
             """
             # Check if extrinsic is included and finalized
-            if "params" in message and isinstance(message["params"]["result"], dict):
+            if "params" in message and isinstance(
+                message["params"]["result"], (dict, str)
+            ):
                 # Convert result enum to lower for backwards compatibility
-                message_result = {
-                    k.lower(): v for k, v in message["params"]["result"].items()
-                }
-
+                msg_result = message["params"]["result"]
+                if isinstance(msg_result, dict):
+                    message_result = {k.lower(): v for k, v in msg_result.items()}
+                else:
+                    message_result = {msg_result: msg_result}
                 # check for any subscription indicators of failure
                 failure_message = None
                 if "usurped" in message_result:
@@ -3047,6 +3067,11 @@ class SubstrateInterface(SubstrateMixin):
                 if "invalid" in message_result:
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
+                    )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} is temporarily in the local buffer pool,"
+                        f" but not yet valid for the mempool."
                     )
 
                 if failure_message is not None:

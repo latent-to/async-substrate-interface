@@ -47,6 +47,7 @@ from async_substrate_interface.errors import (
     ExtrinsicNotFound,
     BlockNotFound,
     StateDiscardedError,
+    StorageFunctionNotFound,
 )
 from async_substrate_interface.protocols import Keypair
 from async_substrate_interface.types import (
@@ -440,6 +441,7 @@ class AsyncQueryMapResult:
         self.ignore_decoding_errors = ignore_decoding_errors
         self.loading_complete = False
         self._buffer = iter(self.records)  # Initialize the buffer with initial records
+        self._records_returned = 0
 
     async def retrieve_next_page(self, start_key) -> list:
         assert self.module is not None
@@ -479,6 +481,9 @@ class AsyncQueryMapResult:
         return self
 
     async def get_next_record(self):
+        if self.max_results is not None and self._records_returned >= self.max_results:
+            self.loading_complete = True
+            return False, None
         try:
             # Try to get the next record from the buffer
             record = next(self._buffer)
@@ -486,6 +491,7 @@ class AsyncQueryMapResult:
             # If no more records in the buffer
             return False, None
         else:
+            self._records_returned += 1
             return True, record
 
     async def __anext__(self):
@@ -507,7 +513,10 @@ class AsyncQueryMapResult:
         self.records.extend(next_page)
         # Update the buffer with the newly fetched records
         self._buffer = iter(next_page)
-        return next(self._buffer)
+        successfully_retrieved, record = await self.get_next_record()
+        if successfully_retrieved:
+            return record
+        raise StopAsyncIteration
 
     def __getitem__(self, item):
         return self.records[item]
@@ -1383,6 +1392,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
     ):
         runtime = await self.init_runtime(block_hash=block_hash)
         metadata_pallet = runtime.metadata.get_metadata_pallet(module)
+        if metadata_pallet is None:
+            raise StorageFunctionNotFound(
+                f"Metadata pallet not found for module '{module}'"
+            )
         storage_item = metadata_pallet.get_storage_function(storage_function)
         return storage_item
 
@@ -2291,7 +2304,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
     async def get_extrinsics(
         self, block_hash: Optional[str] = None, block_number: Optional[int] = None
-    ) -> Optional[list["AsyncExtrinsicReceipt"]]:
+    ) -> Optional[list[GenericExtrinsic]]:
         """
         Return all extrinsics for given block_hash or block_number
 
@@ -2479,7 +2492,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise SubstrateRequestException(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -2579,7 +2592,26 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item: Optional[ScaleType] = None,
         result_handler: Optional[ResultHandler] = None,
         runtime: Optional[Runtime] = None,
+        result_processor: Optional[Callable[[dict, str | int], Any]] = None,
     ) -> RequestResults:
+        """
+        Sends a batch of RPC payloads over the websocket and gathers their responses, optionally decoding
+        them, handling them as subscriptions, or post-processing them as they arrive.
+
+        Args:
+            payloads: list of payload dicts (as produced by `make_payload`) to send; ids must be unique
+            value_scale_type: Scale Type string used for decoding ScaleBytes results
+            storage_item: The ScaleType object used for decoding ScaleBytes results
+            result_handler: the result handler coroutine function used for handling longer-running subscriptions
+            runtime: Optional Runtime to use for decoding. If not specified, the currently-loaded `self.runtime` is used
+            result_processor: optional synchronous callable invoked per non-subscription response as soon as it
+                arrives, receiving `(response, item_id)`; its return value replaces the raw response stored in
+                the result map. Lets callers overlap CPU-bound post-processing (e.g. SCALE decoding) with the
+                network wait for the remaining payloads. Mutually exclusive with `result_handler`.
+
+        Returns:
+            mapping of payload id to the list of (possibly processed) responses received for that request
+        """
         request_manager = RequestManager(payloads)
 
         if len(set(x["id"] for x in payloads)) != len(payloads):
@@ -2636,6 +2668,13 @@ class AsyncSubstrateInterface(SubstrateMixin):
                                 result_handler,
                                 runtime=runtime,
                             )
+                            if (
+                                result_processor is not None
+                                and not asyncio.iscoroutinefunction(result_handler)
+                            ):
+                                decoded_response = result_processor(
+                                    decoded_response, item_id
+                                )
                             request_manager.add_response(
                                 item_id, decoded_response, complete
                             )
@@ -3087,6 +3126,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
         signature: Optional[bytes | str] = None,
+        _skip_cache_update: bool = False,
     ) -> scalecodec.types.GenericExtrinsic:
         """
         Creates an extrinsic signed by given account details
@@ -3096,10 +3136,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
             keypair: Keypair used to sign the extrinsic
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
+            _skip_cache_update: Internal flag. If True, do not write an explicitly-passed nonce into the
+                account-nonce cache. Used by callers that sign without intent to submit (e.g. fee estimation).
 
         Returns:
              The signed Extrinsic
@@ -3119,7 +3161,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Retrieve nonce
         if nonce is None:
-            nonce = await self.get_account_nonce(keypair.ss58_address) or 0
+            nonce = await self.get_account_next_index(keypair.ss58_address) or 0
+        elif not _skip_cache_update:
+            async with self._lock:
+                self._nonces[keypair.ss58_address] = nonce
 
         # Process era
         if era is None:
@@ -3402,6 +3447,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
             assert response is not None
             return response["nonce"]
 
+    def clear_nonce_cache_for_account(self, account_address: str) -> None:
+        """
+        Clears nonce cache for given account address
+
+        Args:
+            account_address: SS58 formatted address
+        """
+        self._nonces.pop(account_address, None)
+
     async def get_account_next_index(
         self, account_address: str, use_cache: bool = True
     ) -> int:
@@ -3412,7 +3466,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         Args:
             account_address: SS58 formatted address
-            use_cache: If True, bypass local nonce cache and always request fresh value from RPC.
+            use_cache: If False, bypass local nonce cache and always request fresh value from RPC.
 
         Returns:
             Next index for the given account address
@@ -3529,7 +3583,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                      required
             era: Specify mortality in blocks in follow format:
                 {'period': [amount_blocks]} If omitted the extrinsic is immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
 
@@ -3549,6 +3603,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
 
+        if nonce is None:
+            nonce = await self.get_account_next_index(
+                keypair.ss58_address, use_cache=False
+            )
+
         # Create extrinsic
         extrinsic = await self.create_signed_extrinsic(
             call=call,
@@ -3558,6 +3617,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,
+            _skip_cache_update=True,
         )
         assert extrinsic.data is not None
         extrinsic_len = len(extrinsic.data)
@@ -3754,7 +3814,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         storage_item = metadata_pallet.get_storage_function(storage_function)
 
         if not metadata_pallet or not storage_item:
-            raise ValueError(
+            raise StorageFunctionNotFound(
                 f'Storage function "{module}.{storage_function}" not found'
             )
 
@@ -3800,6 +3860,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             )
 
         result_keys = response.get("result", [])
+        if max_results is not None:
+            result_keys = result_keys[:max_results]
 
         result = []
         last_key = None
@@ -3828,51 +3890,46 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     ignore_decoding_errors,
                 )
             else:
-                # storage item and value scale type are not included here because this is batch-decoded in rust
+                # Each batch is decoded via ``result_processor`` as soon as
+                # its response lands, overlapping CPU-bound cyscale decoding
+                # with the network wait for the remaining batches.
                 page_batches = [
                     result_keys[i : i + page_size]
                     for i in range(0, len(result_keys), page_size)
                 ]
-                changes = []
-                payloads = []
-                for idx, page_batch in enumerate(page_batches):
-                    payloads.append(
-                        self.make_payload(
-                            str(idx), "state_queryStorageAt", [page_batch, block_hash]
-                        )
+                payloads = [
+                    self.make_payload(
+                        str(idx), "state_queryStorageAt", [page_batch, block_hash]
                     )
+                    for idx, page_batch in enumerate(page_batches)
+                ]
+
+                def process_batch(response_: dict, _item_id) -> list:
+                    if "error" in response_:
+                        raise SubstrateRequestException(response_["error"]["message"])
+                    if "result" not in response_:
+                        raise SubstrateRequestException(response_)
+                    batch_changes = []
+                    for result_group_ in response_["result"]:
+                        batch_changes.extend(result_group_["changes"])
+                    return decode_query_map(
+                        batch_changes,
+                        prefix,
+                        runtime,
+                        param_types,
+                        params,
+                        value_type,
+                        key_hashers,
+                        ignore_decoding_errors,
+                    )
+
                 results: RequestResults = await self._make_rpc_request(
-                    payloads, runtime=runtime
+                    payloads, runtime=runtime, result_processor=process_batch
                 )
-                for result_ in results.values():
-                    res = result_[0]
-                    if "error" in res:
-                        err_msg = res["error"]["message"]
-                        if (
-                            "Client error: Api called for an unknown Block: State already discarded"
-                            in err_msg
-                        ):
-                            bh = err_msg.split("State already discarded for ")[
-                                1
-                            ].strip()
-                            raise StateDiscardedError(bh)
-                        else:
-                            raise SubstrateRequestException(err_msg)
-                    elif "result" not in res:
-                        raise SubstrateRequestException(res)
-                    else:
-                        for result_group in res["result"]:
-                            changes.extend(result_group["changes"])
-                result = decode_query_map(
-                    changes,
-                    prefix,
-                    runtime,
-                    param_types,
-                    params,
-                    value_type,
-                    key_hashers,
-                    ignore_decoding_errors,
-                )
+                result = []
+                for processed in results.values():
+                    # processed is a one-element list containing the decoded batch
+                    result.extend(processed[0])
         return AsyncQueryMapResult(
             records=result,
             page_size=page_size,
@@ -3909,7 +3966,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             max_weight: Maximum allowed weight to execute the call ( Uses `get_payment_info()` by default)
             era: Specify mortality in blocks in follow format: {'period': [amount_blocks]} If omitted the extrinsic is
                 immortal
-            nonce: nonce to include in extrinsics, if omitted the current nonce is retrieved on-chain
+            nonce: nonce to include in extrinsics, if omitted the next account index is retrieved on-chain
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
@@ -4002,7 +4059,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Check requirements
         if not isinstance(extrinsic, GenericExtrinsic):
-            raise TypeError("'extrinsic' must be of type Extrinsics")
+            raise TypeError("'extrinsic' must be of type Extrinsic")
 
         async def result_handler(message: dict, subscription_id) -> tuple[dict, bool]:
             """
@@ -4019,11 +4076,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 the subscription is completed.
             """
             # Check if extrinsic is included and finalized
-            if "params" in message and isinstance(message["params"]["result"], dict):
+            if "params" in message and isinstance(
+                message["params"]["result"], (dict, str)
+            ):
                 # Convert result enum to lower for backwards compatibility
-                message_result = {
-                    k.lower(): v for k, v in message["params"]["result"].items()
-                }
+                msg_result = message["params"]["result"]
+                if isinstance(msg_result, dict):
+                    message_result = {k.lower(): v for k, v in msg_result.items()}
+                else:
+                    message_result = {msg_result: msg_result}
                 # check for any subscription indicators of failure
                 failure_message = None
                 if "usurped" in message_result:
@@ -4043,6 +4104,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 if "invalid" in message_result:
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
+                    )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} is temporarily in the local buffer pool,"
+                        f" but not yet valid for the mempool."
                     )
 
                 if failure_message is not None:

@@ -9,6 +9,7 @@ from async_substrate_interface.async_substrate import (
     AsyncSubstrateInterface,
 )
 from async_substrate_interface.errors import SubstrateRequestException
+from scalecodec.types import GenericCall
 
 
 @pytest.mark.asyncio
@@ -120,6 +121,66 @@ async def test_async_query_map_result_retrieve_all_records():
     assert qm.records == page1 + page2 + page3
     assert qm.loading_complete is True
     assert mock_substrate.query_map.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_async_query_map_result_honors_max_results():
+    """Iteration must stop at max_results, even when the buffer/pages hold more."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+    page2 = [("k4", "v4"), ("k5", "v5")]
+
+    mock_substrate = MagicMock()
+    qm = AsyncQueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=4,
+    )
+
+    # Next page should only be fetched once; iteration must halt at max_results=4
+    # without ever exhausting page2.
+    page2_result = AsyncQueryMapResult(
+        records=list(page2),
+        page_size=3,
+        substrate=mock_substrate,
+        last_key="k5",
+    )
+    mock_substrate.query_map = AsyncMock(return_value=page2_result)
+
+    collected = []
+    async for item in qm:
+        collected.append(item)
+
+    assert collected == page1 + page2[:1]
+    assert len(collected) == 4
+    assert mock_substrate.query_map.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_query_map_result_max_results_stops_within_initial_buffer():
+    """When max_results is below the initial page size, no further pages are fetched."""
+    page1 = [("k1", "v1"), ("k2", "v2"), ("k3", "v3")]
+
+    mock_substrate = MagicMock()
+    mock_substrate.query_map = AsyncMock()
+
+    qm = AsyncQueryMapResult(
+        records=list(page1),
+        page_size=3,
+        substrate=mock_substrate,
+        module="TestModule",
+        storage_function="TestStorage",
+        last_key="k3",
+        max_results=2,
+    )
+
+    collected = [item async for item in qm]
+
+    assert collected == page1[:2]
+    mock_substrate.query_map.assert_not_awaited()
 
 
 class TestGetBlockHash:
@@ -244,6 +305,122 @@ async def test_get_account_next_index_bypass_mode_raises_on_rpc_error():
             "5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
             use_cache=False,
         )
+
+
+def _make_mock_call():
+    call = object.__new__(GenericCall)
+    call.value = {
+        "call_function": "transfer_allow_death",
+        "call_module": "Balances",
+        "call_args": [],
+    }
+    return call
+
+
+def _make_mock_runtime_and_extrinsic():
+    extrinsic = MagicMock()
+    runtime = MagicMock()
+    runtime.metadata = {1: {1: {"extrinsic": {"version": 4}}}}
+    runtime.runtime_config.create_scale_object.return_value = extrinsic
+    runtime.runtime_config.get_decoder_class.return_value = None
+    return runtime, extrinsic
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_uses_next_index_when_nonce_omitted():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.get_account_next_index = AsyncMock(return_value=7)
+    substrate.get_account_nonce = AsyncMock(return_value=3)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    result = await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        signature=b"\x00" * 64,
+    )
+
+    assert result is extrinsic
+    substrate.get_account_next_index.assert_awaited_once_with(keypair.ss58_address)
+    substrate.get_account_nonce.assert_not_awaited()
+    extrinsic.encode.assert_called_once()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 7
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_keeps_explicit_nonce():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.get_account_next_index = AsyncMock(return_value=7)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+
+    substrate.get_account_next_index.assert_not_awaited()
+    assert extrinsic.encode.call_args.args[0]["nonce"] == 11
+    assert substrate._nonces[keypair.ss58_address] == 11
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_explicit_nonce_advances_cache():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.rpc_request = AsyncMock(return_value={"result": 99})
+    substrate.supports_rpc_method = AsyncMock(return_value=True)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+    follow_up = await substrate.get_account_next_index(keypair.ss58_address)
+
+    assert follow_up == 12
+    substrate.rpc_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_skip_cache_update_leaves_cache_untouched():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+        _skip_cache_update=True,
+    )
+
+    assert keypair.ss58_address not in substrate._nonces
 
 
 class TestAsyncExtrinsicReceiptProcessEvents:

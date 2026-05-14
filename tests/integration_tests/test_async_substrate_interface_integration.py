@@ -156,43 +156,6 @@ async def test_improved_reconnection():
     print("test_improved_reconnection succeeded")
 
 
-@pytest.mark.asyncio
-async def test_get_payment_info(alice_coldkey, bob_coldkey):
-    print("Testing test_get_payment_info")
-    substrate = await get_mock_substrate("test_get_payment_info")
-    block_hash = await substrate.get_chain_head()
-    call = await substrate.compose_call(
-        "Balances",
-        "transfer_keep_alive",
-        {"dest": bob_coldkey.ss58_address, "value": 100_000},
-        block_hash,
-    )
-    payment_info = await substrate.get_payment_info(
-        call=call,
-        keypair=alice_coldkey,
-    )
-    partial_fee_no_era = payment_info["partial_fee"]
-    assert partial_fee_no_era > 0
-    payment_info_era = await substrate.get_payment_info(
-        call=call, keypair=alice_coldkey, era={"period": 64}
-    )
-    partial_fee_era = payment_info_era["partial_fee"]
-    assert partial_fee_era > partial_fee_no_era
-
-    payment_info_all_options = await substrate.get_payment_info(
-        call=call,
-        keypair=alice_coldkey,
-        era={"period": 64},
-        nonce=await substrate.get_account_nonce(alice_coldkey.ss58_address),
-        tip=5_000_000,
-        tip_asset_id=64,
-    )
-    partial_fee_all_options = payment_info_all_options["partial_fee"]
-    assert partial_fee_all_options > partial_fee_no_era
-    assert partial_fee_all_options > partial_fee_era
-    print("test_get_payment_info succeeded")
-
-
 async def test_bits():
     substrate = await get_mock_substrate("test_bits")
     current_sqrt_price = await substrate.query(
