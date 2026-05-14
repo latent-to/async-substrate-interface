@@ -373,6 +373,32 @@ async def test_create_signed_extrinsic_keeps_explicit_nonce():
 
     substrate.get_account_next_index.assert_not_awaited()
     assert extrinsic.encode.call_args.args[0]["nonce"] == 11
+    assert substrate._nonces[keypair.ss58_address] == 11
+
+
+@pytest.mark.asyncio
+async def test_create_signed_extrinsic_explicit_nonce_advances_cache():
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    runtime, extrinsic = _make_mock_runtime_and_extrinsic()
+    substrate.init_runtime = AsyncMock(return_value=runtime)
+    substrate.rpc_request = AsyncMock(return_value={"result": 99})
+    substrate.supports_rpc_method = AsyncMock(return_value=True)
+    keypair = MagicMock(
+        ss58_address="5F3sa2TJAWMqDhXG6jhV4N8ko9NoFz5Y2s8vS8uM9f7v7mA",
+        public_key=b"\x01" * 32,
+        crypto_type=1,
+    )
+
+    await substrate.create_signed_extrinsic(
+        call=_make_mock_call(),
+        keypair=keypair,
+        nonce=11,
+        signature=b"\x00" * 64,
+    )
+    follow_up = await substrate.get_account_next_index(keypair.ss58_address)
+
+    assert follow_up == 12
+    substrate.rpc_request.assert_not_awaited()
 
 
 class TestAsyncExtrinsicReceiptProcessEvents:

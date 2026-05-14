@@ -3159,6 +3159,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # Retrieve nonce
         if nonce is None:
             nonce = await self.get_account_next_index(keypair.ss58_address) or 0
+        else:
+            async with self._lock:
+                self._nonces[keypair.ss58_address] = nonce
 
         # Process era
         if era is None:
