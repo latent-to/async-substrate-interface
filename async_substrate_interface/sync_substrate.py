@@ -3068,6 +3068,10 @@ class SubstrateInterface(SubstrateMixin):
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
                     )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} still waiting for previous nonce."
+                    )
 
                 if failure_message is not None:
                     self.rpc_request("author_unwatchExtrinsic", [subscription_id])

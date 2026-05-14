@@ -4089,6 +4089,10 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
                     )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} still waiting for previous nonce."
+                    )
 
                 if failure_message is not None:
                     async with self.ws as ws:
