@@ -18,6 +18,8 @@
   in https://github.com/latent-to/async-substrate-interface/pull/350
 * fix:auto-signed extrinsics to use account_nextIndex by @zeus1959
   in https://github.com/latent-to/async-substrate-interface/pull/345
+* Correctly handle nonce is get_payment_info by @thewhaleking
+  in https://github.com/latent-to/async-substrate-interface/pull/355
 
 ## New Contributors
 
