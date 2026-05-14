@@ -3126,6 +3126,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
         signature: Optional[bytes | str] = None,
+        _skip_cache_update: bool = False,
     ) -> scalecodec.types.GenericExtrinsic:
         """
         Creates an extrinsic signed by given account details
@@ -3139,6 +3140,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
+            _skip_cache_update: Internal flag. If True, do not write an explicitly-passed nonce into the
+                account-nonce cache. Used by callers that sign without intent to submit (e.g. fee estimation).
 
         Returns:
              The signed Extrinsic
@@ -3443,6 +3446,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
             )
             assert response is not None
             return response["nonce"]
+
+    def clear_nonce_cache_for_account(self, account_address: str) -> None:
+        """
+        Clears nonce cache for given account address
+
+        Args:
+            account_address: SS58 formatted address
+        """
+        self._nonces.pop(account_address, None)
 
     async def get_account_next_index(
         self, account_address: str, use_cache: bool = True
