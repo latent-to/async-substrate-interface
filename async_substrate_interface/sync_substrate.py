@@ -2271,7 +2271,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Retrieve nonce
         if nonce is None:
-            nonce = self.get_account_next_index(keypair.ss58_address) or 0
+            nonce = self.get_account_next_index(keypair.ss58_address)
 
         # Process era
         if era is None:
@@ -2638,7 +2638,7 @@ class SubstrateInterface(SubstrateMixin):
             call=call,
             keypair=keypair,
             era=era,
-            nonce=nonce,
+            nonce=nonce or self.get_account_next_index(keypair.ss58_address),
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,

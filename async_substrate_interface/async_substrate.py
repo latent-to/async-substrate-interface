@@ -3593,7 +3593,12 @@ class AsyncSubstrateInterface(SubstrateMixin):
             call=call,
             keypair=keypair,
             era=era,
-            nonce=nonce,
+            nonce=(
+                nonce
+                or await self.get_account_next_index(
+                    keypair.ss58_address, use_cache=False
+                )
+            ),
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,
