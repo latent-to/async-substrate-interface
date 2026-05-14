@@ -4091,7 +4091,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
                     )
                 if "future" in message_result:
                     logger.warning(
-                        f"Subscription {subscription_id} still waiting for previous nonce."
+                        f"Subscription {subscription_id} is temporarily in the local buffer pool,"
+                        f" but not yet valid for the mempool."
                     )
 
                 if failure_message is not None:
