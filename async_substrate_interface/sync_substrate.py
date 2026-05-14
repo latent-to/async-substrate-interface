@@ -2633,12 +2633,15 @@ class SubstrateInterface(SubstrateMixin):
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
 
+        if nonce is None:
+            nonce = self.get_account_next_index(keypair.ss58_address)
+
         # Create extrinsic
         extrinsic = self.create_signed_extrinsic(
             call=call,
             keypair=keypair,
             era=era,
-            nonce=nonce or self.get_account_next_index(keypair.ss58_address),
+            nonce=nonce,
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,

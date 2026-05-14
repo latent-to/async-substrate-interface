@@ -3588,17 +3588,17 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
 
+        if nonce is None:
+            nonce = await self.get_account_next_index(
+                keypair.ss58_address, use_cache=False
+            )
+
         # Create extrinsic
         extrinsic = await self.create_signed_extrinsic(
             call=call,
             keypair=keypair,
             era=era,
-            nonce=(
-                nonce
-                or await self.get_account_next_index(
-                    keypair.ss58_address, use_cache=False
-                )
-            ),
+            nonce=nonce,
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,
