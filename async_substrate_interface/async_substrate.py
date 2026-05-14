@@ -4046,7 +4046,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Check requirements
         if not isinstance(extrinsic, GenericExtrinsic):
-            raise TypeError("'extrinsic' must be of type Extrinsics")
+            raise TypeError("'extrinsic' must be of type Extrinsic")
 
         async def result_handler(message: dict, subscription_id) -> tuple[dict, bool]:
             """
