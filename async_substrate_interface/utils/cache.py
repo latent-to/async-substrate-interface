@@ -559,7 +559,7 @@ class CachedFetcher:
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
         key = self.make_cache_key(args, kwargs)
 
-        if item := self._cache.get(key):
+        if (item := self._cache.get(key)) is not None:
             return item
 
         if key in self._inflight:
@@ -571,7 +571,12 @@ class CachedFetcher:
 
         try:
             result = await self._method(*args, **kwargs)
-            self._cache.set(key, result)
+            # Do not cache None: callers like `get_block_runtime_version_for`
+            # use it as an error/missing-result sentinel, and caching it would
+            # poison the cache against transient failures (rate limits, missing
+            # parent block during a reorg, etc.).
+            if result is not None:
+                self._cache.set(key, result)
             future.set_result(result)
             return result
         except Exception:
