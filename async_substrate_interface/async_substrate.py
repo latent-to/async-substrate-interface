@@ -3126,6 +3126,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
         tip: int = 0,
         tip_asset_id: Optional[int] = None,
         signature: Optional[bytes | str] = None,
+        _skip_cache_update: bool = False,
     ) -> scalecodec.types.GenericExtrinsic:
         """
         Creates an extrinsic signed by given account details
@@ -3139,6 +3140,8 @@ class AsyncSubstrateInterface(SubstrateMixin):
             tip: The tip for the block author to gain priority during network congestion
             tip_asset_id: Optional asset ID with which to pay the tip
             signature: Optionally provide signature if externally signed
+            _skip_cache_update: Internal flag. If True, do not write an explicitly-passed nonce into the
+                account-nonce cache. Used by callers that sign without intent to submit (e.g. fee estimation).
 
         Returns:
              The signed Extrinsic
@@ -3159,6 +3162,9 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # Retrieve nonce
         if nonce is None:
             nonce = await self.get_account_next_index(keypair.ss58_address) or 0
+        elif not _skip_cache_update:
+            async with self._lock:
+                self._nonces[keypair.ss58_address] = nonce
 
         # Process era
         if era is None:
@@ -3441,6 +3447,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
             assert response is not None
             return response["nonce"]
 
+    def clear_nonce_cache_for_account(self, account_address: str) -> None:
+        """
+        Clears nonce cache for given account address
+
+        Args:
+            account_address: SS58 formatted address
+        """
+        self._nonces.pop(account_address, None)
+
     async def get_account_next_index(
         self, account_address: str, use_cache: bool = True
     ) -> int:
@@ -3588,6 +3603,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
 
+        if nonce is None:
+            nonce = await self.get_account_next_index(
+                keypair.ss58_address, use_cache=False
+            )
+
         # Create extrinsic
         extrinsic = await self.create_signed_extrinsic(
             call=call,
@@ -3597,6 +3617,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
             tip=tip,
             tip_asset_id=tip_asset_id,
             signature=signature,
+            _skip_cache_update=True,
         )
         assert extrinsic.data is not None
         extrinsic_len = len(extrinsic.data)
@@ -4038,7 +4059,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
 
         # Check requirements
         if not isinstance(extrinsic, GenericExtrinsic):
-            raise TypeError("'extrinsic' must be of type Extrinsics")
+            raise TypeError("'extrinsic' must be of type Extrinsic")
 
         async def result_handler(message: dict, subscription_id) -> tuple[dict, bool]:
             """
@@ -4055,11 +4076,15 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 the subscription is completed.
             """
             # Check if extrinsic is included and finalized
-            if "params" in message and isinstance(message["params"]["result"], dict):
+            if "params" in message and isinstance(
+                message["params"]["result"], (dict, str)
+            ):
                 # Convert result enum to lower for backwards compatibility
-                message_result = {
-                    k.lower(): v for k, v in message["params"]["result"].items()
-                }
+                msg_result = message["params"]["result"]
+                if isinstance(msg_result, dict):
+                    message_result = {k.lower(): v for k, v in msg_result.items()}
+                else:
+                    message_result = {msg_result: msg_result}
                 # check for any subscription indicators of failure
                 failure_message = None
                 if "usurped" in message_result:
@@ -4079,6 +4104,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 if "invalid" in message_result:
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
+                    )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} is temporarily in the local buffer pool,"
+                        f" but not yet valid for the mempool."
                     )
 
                 if failure_message is not None:

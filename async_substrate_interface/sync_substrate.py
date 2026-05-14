@@ -2271,7 +2271,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Retrieve nonce
         if nonce is None:
-            nonce = self.get_account_next_index(keypair.ss58_address) or 0
+            nonce = self.get_account_next_index(keypair.ss58_address)
 
         # Process era
         if era is None:
@@ -2632,6 +2632,9 @@ class SubstrateInterface(SubstrateMixin):
 
         # No valid signature is required for fee estimation
         signature = "0x" + "00" * 64
+
+        if nonce is None:
+            nonce = self.get_account_next_index(keypair.ss58_address)
 
         # Create extrinsic
         extrinsic = self.create_signed_extrinsic(
@@ -3019,7 +3022,7 @@ class SubstrateInterface(SubstrateMixin):
 
         # Check requirements
         if not isinstance(extrinsic, GenericExtrinsic):
-            raise TypeError("'extrinsic' must be of type Extrinsics")
+            raise TypeError("'extrinsic' must be of type Extrinsic")
 
         def result_handler(message: dict, subscription_id) -> tuple[dict, bool]:
             """
@@ -3036,12 +3039,15 @@ class SubstrateInterface(SubstrateMixin):
                 the subscription is completed.
             """
             # Check if extrinsic is included and finalized
-            if "params" in message and isinstance(message["params"]["result"], dict):
+            if "params" in message and isinstance(
+                message["params"]["result"], (dict, str)
+            ):
                 # Convert result enum to lower for backwards compatibility
-                message_result = {
-                    k.lower(): v for k, v in message["params"]["result"].items()
-                }
-
+                msg_result = message["params"]["result"]
+                if isinstance(msg_result, dict):
+                    message_result = {k.lower(): v for k, v in msg_result.items()}
+                else:
+                    message_result = {msg_result: msg_result}
                 # check for any subscription indicators of failure
                 failure_message = None
                 if "usurped" in message_result:
@@ -3061,6 +3067,11 @@ class SubstrateInterface(SubstrateMixin):
                 if "invalid" in message_result:
                     failure_message = (
                         f"Subscription {subscription_id} invalid: {message_result}"
+                    )
+                if "future" in message_result:
+                    logger.warning(
+                        f"Subscription {subscription_id} is temporarily in the local buffer pool,"
+                        f" but not yet valid for the mempool."
                     )
 
                 if failure_message is not None:
