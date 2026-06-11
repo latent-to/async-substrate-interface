@@ -1,6 +1,6 @@
 [project]
 name = "async-substrate-interface"
-version = "2.1.0"
+version = "2.2.0"
 description = "Asyncio library for interacting with substrate. Mostly API-compatible with py-substrate-interface"
 readme = "README.md"
 license = { file = "LICENSE" }

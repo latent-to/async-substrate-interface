@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0 /2026-06-11
+
+## What's Changed
+
+* iscoroutinefunction deprecation by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/362
+* New Method: `runtime_calls` by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/361
+* Batch StorageKey creation by @thewhaleking in https://github.com/latent-to/async-substrate-interface/pull/363
+* fix(pyproject): drop unused wheel dep, update setuptools by @kilyanni
+  in https://github.com/latent-to/async-substrate-interface/pull/364
+
+## New Contributors
+
+* @kilyanni made their first contribution in https://github.com/latent-to/async-substrate-interface/pull/364
+
+**Full Changelog**: https://github.com/latent-to/async-substrate-interface/compare/v2.1.0...v2.2.0
+
 ## 2.1.0 /2026-06-01
 
 ## What's Changed
