@@ -17,11 +17,12 @@ wheels = [
 
 [[package]]
 name = "async-substrate-interface"
-version = "2.0.3"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "cyscale" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
     { name = "websockets" },
     { name = "wheel" },
     { name = "xxhash" },
@@ -55,6 +56,7 @@ requires-dist = [
     { name = "pytest-split", marker = "extra == 'dev'", specifier = "==0.11.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = "==3.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.12" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'", specifier = ">=4.0.0" },
     { name = "websockets", specifier = ">=14.1" },
     { name = "wheel", specifier = ">0.46.1" },
     { name = "xxhash" },

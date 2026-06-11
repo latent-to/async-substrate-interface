@@ -84,6 +84,98 @@ async def test_runtime_call(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_runtime_calls():
+    """Multiple runtime calls are encoded, sent as one batch, and decoded in order."""
+    print("Testing test_runtime_calls")
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+
+    fake_runtime = MagicMock()
+    fake_runtime.metadata_v15 = MagicMock()  # non-None so the V15 path is taken
+    fake_runtime.runtime_api_map = {
+        "Api": {
+            "m1": {"inputs": [{"name": "a", "ty": "3"}], "output": "1"},
+            "m2": {"inputs": [{"name": "b", "ty": "4"}], "output": "2"},
+        }
+    }
+    fake_runtime.type_id_to_name = {}  # no Vec<u8> outputs → modern path for both
+    substrate.init_runtime = AsyncMock(return_value=fake_runtime)
+
+    # block_hash=None is pinned to the chain head so the batch is a consistent snapshot.
+    substrate.get_chain_head = AsyncMock(return_value="0xBLOCK")
+
+    # Each input encodes to a single byte 0xab → hex "ab".
+    substrate.encode_scale = AsyncMock(return_value=b"\xab")
+
+    decoded_1, decoded_2 = MagicMock(), MagicMock()
+    decoded_1.value, decoded_2.value = "result_1", "result_2"
+    substrate.decode_scale = AsyncMock(side_effect=[decoded_1, decoded_2])
+
+    # Mock the websocket: send_batch hands back ids, retrieve resolves each by id.
+    ws_responses = {"id0": {"result": "0x00"}, "id1": {"result": "0x01"}}
+    ws_mock = MagicMock()
+    ws_mock.mark_waiting_for_response = AsyncMock()
+    ws_mock.mark_response_received = AsyncMock()
+    ws_mock.send_batch = AsyncMock(return_value=["id0", "id1"])
+    ws_mock.retrieve = AsyncMock(side_effect=lambda item_id: ws_responses[item_id])
+    substrate.ws = MagicMock()
+    substrate.ws.__aenter__ = AsyncMock(return_value=ws_mock)
+    substrate.ws.__aexit__ = AsyncMock(return_value=False)
+
+    results = await substrate.runtime_calls(
+        [
+            ("Api", "m1", ["foo"]),
+            ("Api", "m2", {"b": "bar"}),
+        ]
+    )
+
+    assert results == ["result_1", "result_2"]
+
+    # One batch frame carrying both state_call payloads, pinned to the same block.
+    ws_mock.send_batch.assert_awaited_once_with(
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "state_call",
+                "params": ["Api_m1", "ab", "0xBLOCK"],
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "state_call",
+                "params": ["Api_m2", "ab", "0xBLOCK"],
+            },
+        ]
+    )
+
+    # Results decoded against each call's own output type, in input order.
+    substrate.decode_scale.assert_any_call("scale_info::1", b"\x00", runtime=ANY)
+    substrate.decode_scale.assert_any_call("scale_info::2", b"\x01", runtime=ANY)
+    print("test_runtime_calls succeeded")
+
+
+@pytest.mark.asyncio
+async def test_runtime_calls_unknown_method_raises():
+    """An unknown api.method surfaces a ValueError before anything is sent."""
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    fake_runtime = MagicMock()
+    fake_runtime.metadata_v15 = MagicMock()
+    fake_runtime.runtime_api_map = {"Api": {}}
+    fake_runtime.type_id_to_name = {}
+    substrate.init_runtime = AsyncMock(return_value=fake_runtime)
+
+    with pytest.raises(ValueError, match="not found in registry"):
+        await substrate.runtime_calls([("Api", "missing", None)])
+
+
+@pytest.mark.asyncio
+async def test_runtime_calls_empty_returns_empty():
+    """No calls means no request and an empty result list."""
+    substrate = AsyncSubstrateInterface("ws://localhost", _mock=True)
+    substrate.init_runtime = AsyncMock()
+    assert await substrate.runtime_calls([]) == []
+    substrate.init_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_async_query_map_result_retrieve_all_records():
     """Test that retrieve_all_records fetches all pages and returns the full record list."""
     page1 = [("key1", "val1"), ("key2", "val2")]

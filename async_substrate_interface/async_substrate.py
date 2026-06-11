@@ -911,12 +911,26 @@ class Websocket:
                 )
 
             async with self._lock:
+                resent_batches: set[str] = set()
                 for original_id in list(self._inflight.keys()):
                     payload = self._inflight.pop(original_id)
-                    self._received[original_id] = loop.create_future()
-                    to_send = json.loads(payload)
-                    logger.debug(f"Resubmitting {to_send['id']}")
-                    await self._sending.put(to_send)
+                    parsed = json.loads(payload)
+                    if isinstance(parsed, list):
+                        # Every id in a batch maps to the same frame; recreate all
+                        # of their futures but only re-enqueue the frame once.
+                        if payload in resent_batches:
+                            continue
+                        resent_batches.add(payload)
+                        for sub in parsed:
+                            self._received[sub["id"]] = loop.create_future()
+                        logger.debug(
+                            f"Resubmitting batch {[sub['id'] for sub in parsed]}"
+                        )
+                        await self._sending.put(parsed)
+                    else:
+                        self._received[original_id] = loop.create_future()
+                        logger.debug(f"Resubmitting {parsed['id']}")
+                        await self._sending.put(parsed)
 
             logger.debug("Attempting reconnection...")
             await self.connect(True)
@@ -993,6 +1007,16 @@ class Websocket:
         if self._log_raw_websockets:
             raw_websocket_logger.debug(f"WEBSOCKET_RECEIVE> {recd.decode()}")
         response = json.loads(recd)
+        if isinstance(response, list):
+            # JSON-RPC 2.0 batch response: a single frame carrying an array of
+            # individual responses. Each is demuxed to its own future by `id`
+            # (order is not guaranteed by the spec, hence id-based dispatch).
+            for item in response:
+                await self._dispatch_response(item)
+        else:
+            await self._dispatch_response(response)
+
+    async def _dispatch_response(self, response: dict) -> None:
         if "id" in response:
             async with self._lock:
                 inflight_item = self._inflight.pop(response["id"], None)
@@ -1062,10 +1086,15 @@ class Websocket:
                 to_send_ = await self._sending.get()
                 logger.debug("Retrieved item from sending queue")
                 self._sending.task_done()
-                send_id = to_send_["id"]
                 to_send = json.dumps(to_send_)
                 async with self._lock:
-                    self._inflight[send_id] = to_send
+                    if isinstance(to_send_, list):
+                        # JSON-RPC batch frame: every sub-request shares this frame,
+                        # so track each id as inflight against the same payload string.
+                        for sub in to_send_:
+                            self._inflight[sub["id"]] = to_send
+                    else:
+                        self._inflight[to_send_["id"]] = to_send
                 if self._log_raw_websockets:
                     raw_websocket_logger.debug(f"WEBSOCKET_SEND> {to_send}")
                 await ws.send(to_send)
@@ -1086,10 +1115,12 @@ class Websocket:
                     exc_info=e,
                 )
                 if to_send is not None:
-                    to_send_ = json.loads(to_send)
-                    if to_send_["id"] in self._received:
-                        self._received[to_send_["id"]].set_exception(e)
-                        self._received[to_send_["id"]].cancel()
+                    parsed = json.loads(to_send)
+                    items = parsed if isinstance(parsed, list) else [parsed]
+                    for item in items:
+                        if item["id"] in self._received:
+                            self._received[item["id"]].set_exception(e)
+                            self._received[item["id"]].cancel()
                 else:
                     for i in self._received.keys():
                         self._received[i].set_exception(e)
@@ -1120,6 +1151,40 @@ class Websocket:
         to_send = {**payload, **{"id": original_id}}
         await self._sending.put(to_send)
         return original_id
+
+    async def send_batch(self, payloads: list[dict]) -> list[str]:
+        """
+        Sends multiple payloads as a single JSON-RPC 2.0 batch: one websocket frame
+        containing an array of requests. Each sub-request is assigned its own id and
+        future, so the responses are demuxed and can be retrieved individually with
+        `retrieve` (in whatever order the server returns them).
+
+        Args:
+            payloads: list of JSON-RPC payload dicts, each with "jsonrpc", "method",
+                and "params" (without "id" — an id is assigned here per sub-request).
+
+        Returns:
+            list of internal request ids, in the same order as `payloads`.
+        """
+        # Acquire one subscription permit per sub-request (released individually by
+        # `retrieve`). Done before taking the lock to match `send` and avoid blocking
+        # the lock on a full semaphore.
+        for _ in payloads:
+            await self.max_subscriptions.acquire()
+        ids: list[str] = []
+        batch: list[dict] = []
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            for payload in payloads:
+                original_id = get_next_id()
+                while original_id in self._in_use_ids:
+                    original_id = get_next_id()
+                self._in_use_ids.add(original_id)
+                self._received[original_id] = loop.create_future()
+                ids.append(original_id)
+                batch.append({**payload, "id": original_id})
+        await self._sending.put(batch)
+        return ids
 
     async def unsubscribe(
         self, subscription_id: str, method: str = "author_unwatchExtrinsic"
@@ -1630,6 +1695,48 @@ class AsyncSubstrateInterface(SubstrateMixin):
         runtime = await self.init_runtime(block_hash=block_hash)
         params = params or []
         return StorageKey.create_from_storage_function(
+            pallet,
+            storage_function,
+            params,
+            runtime_config=runtime.runtime_config,
+            metadata=runtime.metadata,
+        )
+
+    async def create_storage_keys(
+        self,
+        pallet: str,
+        storage_function: str,
+        params: list[list],
+        block_hash: Optional[str] = None,
+    ) -> list[StorageKey]:
+        """
+        Creates a batch of storage keys with the same pallet/storage function, but with differing params.
+
+        Args:
+            pallet: name of pallet
+            storage_function: name of storage function
+            params: list of lists of parameters in case of a Mapped storage function
+            block_hash: the hash of the blockchain block whose runtime to use
+
+        Example:
+
+        ```
+        storage_keys = await substrate.create_storage_keys(
+            pallet="Balances",
+            storage_function="Account",
+            params=[
+                ["5gkods..."],
+                ["5jkgji..."],
+                ["5kdfni..."],
+            ],
+            block_hash="0xj9d3...",
+        ```
+
+        Returns:
+            list of StorageKeys
+        """
+        runtime = await self.init_runtime(block_hash=block_hash)
+        return StorageKey.create_from_storage_function_batch(
             pallet,
             storage_function,
             params,
@@ -2579,7 +2686,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 q = query_value
             decoded = await self.decode_scale(value_scale_type, q, runtime=runtime)
             result = decoded
-        if asyncio.iscoroutinefunction(result_handler):
+        if inspect.iscoroutinefunction(result_handler):
             # For multipart responses as a result of subscriptions.
             message, bool_result = await result_handler(result, subscription_id)  # type: ignore[arg-type]
             return message, bool_result
@@ -2637,11 +2744,11 @@ class AsyncSubstrateInterface(SubstrateMixin):
                 for item_id in request_manager.unresponded():
                     if (
                         item_id not in request_manager.responses
-                        or asyncio.iscoroutinefunction(result_handler)
+                        or inspect.iscoroutinefunction(result_handler)
                     ):
                         if response := await ws.retrieve(item_id):
                             if (
-                                asyncio.iscoroutinefunction(result_handler)
+                                inspect.iscoroutinefunction(result_handler)
                                 and not subscription_added
                             ):
                                 # handles subscriptions, overwrites the previous mapping of {item_id : payload_id}
@@ -2670,7 +2777,7 @@ class AsyncSubstrateInterface(SubstrateMixin):
                             )
                             if (
                                 result_processor is not None
-                                and not asyncio.iscoroutinefunction(result_handler)
+                                and not inspect.iscoroutinefunction(result_handler)
                             ):
                                 decoded_response = result_processor(
                                     decoded_response, item_id
@@ -3439,6 +3546,155 @@ class AsyncSubstrateInterface(SubstrateMixin):
         result_bytes = hex_to_bytes(result_data["result"])
         obj = await self.decode_scale(output_type_string, result_bytes, runtime=runtime)
         return obj.value
+
+    async def runtime_calls(
+        self,
+        calls: list[tuple[str, str, Optional[list | dict]]],
+        block_hash: Optional[str] = None,
+    ) -> list[ScaleValue]:
+        """
+        Calls multiple runtime API methods in a single JSON-RPC 2.0 batch request.
+
+        This is the runtime-call analogue of `query_multi`: rather than one `state_call`
+        round-trip per call, every call is encoded and sent as a single websocket frame
+        (a JSON-RPC batch), and the responses are demuxed and decoded individually. All
+        calls are executed at the same `block_hash`, giving a consistent snapshot.
+
+        Example:
+
+        ```
+        results = await substrate.runtime_calls(
+            [
+                ("AccountNonceApi", "account_nonce", [account_id]),
+                ("TransactionPaymentApi", "query_fee_details", [extrinsic, length]),
+            ]
+        )
+        ```
+
+        Note:
+            - Requires the RPC node to support JSON-RPC 2.0 batch requests. All
+              Substrate/jsonrpsee nodes do so by default.
+            - Only the modern (metadata v15) runtime-call path is supported. If the
+              runtime predates metadata v15, or any call resolves to a legacy
+              runtime-call definition, a `NotImplementedError` is raised — use
+              `runtime_call` (optionally with `asyncio.gather`) for those.
+            - This is not necessarily faster than gathering individual `runtime_call`s
+              with `asyncio.gather`: that already pipelines the requests over the shared
+              websocket (~1 round-trip total), and nodes typically execute the items of
+              a batch sequentially while running separate messages concurrently — so
+              `gather` is often the lower-latency choice. The advantage of batching here
+              is that all calls travel as a single JSON-RPC message, which helps against
+              endpoints that rate-limit per message, plus the consistent-snapshot and
+              one-message-one-reply semantics.
+
+        Args:
+            calls: list of `(api, method, params)` tuples. `params` may be a list, a
+                dict, or `None` (same semantics as `runtime_call`).
+            block_hash: Hash of the block at which to make the runtime API calls.
+
+        Returns:
+            list of decoded runtime-call results, in the same order as `calls`.
+        """
+        if not calls:
+            return []
+
+        # Pin to a concrete block so every call in the batch hits the same state,
+        # even if the chain advances mid-request (a plain `None` would let each
+        # call resolve "best block" independently).
+        if block_hash is None:
+            block_hash = await self.get_chain_head()
+
+        runtime = await self.init_runtime(block_hash=block_hash)
+
+        if runtime.metadata_v15 is None:
+            raise NotImplementedError(
+                "runtime_calls only supports the modern (metadata v15) runtime-call "
+                "path. Use runtime_call for legacy runtimes."
+            )
+
+        payloads: list[dict] = []
+        call_defs: list[dict] = []
+        for api, method, params in calls:
+            if params is None:
+                params = {}
+
+            try:
+                runtime_call_def = runtime.runtime_api_map[api][method]
+            except KeyError:
+                raise ValueError(
+                    f"Runtime API Call '{api}.{method}' not found in registry"
+                )
+
+            if _determine_if_old_runtime_call(runtime_call_def, runtime):
+                raise NotImplementedError(
+                    f"Runtime call '{api}.{method}' uses the legacy call path, which "
+                    f"runtime_calls does not support. Use runtime_call instead."
+                )
+
+            if isinstance(params, list) and len(params) != len(
+                runtime_call_def["inputs"]
+            ):
+                raise ValueError(
+                    f"Number of parameter provided ({len(params)}) does not "
+                    f"match definition {len(runtime_call_def['inputs'])} for "
+                    f"'{api}.{method}'"
+                )
+
+            # Encode params
+            param_data = b""
+            for idx, param in enumerate(runtime_call_def["inputs"]):
+                param_type_string = f"scale_info::{param['ty']}"
+                if isinstance(params, list):
+                    param_data += await self.encode_scale(
+                        param_type_string, params[idx], runtime=runtime
+                    )
+                else:
+                    if param["name"] not in params:
+                        raise ValueError(
+                            f"Runtime Call param '{param['name']}' is missing for "
+                            f"'{api}.{method}'"
+                        )
+                    param_data += await self.encode_scale(
+                        param_type_string, params[param["name"]], runtime=runtime
+                    )
+
+            payloads.append(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "state_call",
+                    "params": [f"{api}_{method}", param_data.hex(), block_hash],
+                }
+            )
+            call_defs.append(runtime_call_def)
+
+        # Send all calls as one JSON-RPC batch frame, then gather responses by id.
+        async with self.ws as ws:
+            await ws.mark_waiting_for_response()
+            item_ids = await ws.send_batch(payloads)
+            responses: dict[str, dict] = {}
+            pending = set(item_ids)
+            while pending:
+                for item_id in list(pending):
+                    if (response := await ws.retrieve(item_id)) is not None:
+                        responses[item_id] = response
+                        pending.discard(item_id)
+                if pending:
+                    await asyncio.sleep(0.01)
+            await ws.mark_response_received()
+
+        # Decode each result against its own output type, preserving input order.
+        results: list[ScaleValue] = []
+        for item_id, runtime_call_def in zip(item_ids, call_defs):
+            result_data = responses[item_id]
+            if "error" in result_data:
+                raise SubstrateRequestException(result_data["error"]["message"])
+            output_type_string = f"scale_info::{runtime_call_def['output']}"
+            result_bytes = hex_to_bytes(result_data["result"])
+            obj = await self.decode_scale(
+                output_type_string, result_bytes, runtime=runtime
+            )
+            results.append(obj.value)
+        return results
 
     async def get_account_nonce(self, account_address: str) -> int:
         """

@@ -684,6 +684,36 @@ async def test_old_runtime_calls_natively(substrate):
 
 
 @pytest.mark.asyncio
+async def test_runtime_calls(substrate):
+    """Two runtime calls batched into a single JSON-RPC request return the same
+    results as making them individually at the same block."""
+    print("Testing test_runtime_calls")
+    block_hash = await substrate.get_chain_finalised_head()
+
+    calls = [
+        ("SubnetInfoRuntimeApi", "get_all_dynamic_info", []),
+        ("SwapRuntimeApi", "current_alpha_price", [1]),
+    ]
+
+    batched = await substrate.runtime_calls(calls, block_hash=block_hash)
+    assert len(batched) == 2
+
+    dynamic_info, alpha_price = batched
+    # get_all_dynamic_info returns a list (one entry per subnet).
+    assert isinstance(dynamic_info, list)
+    assert len(dynamic_info) > 0
+    assert alpha_price is not None
+
+    # Batched results must match the individual runtime_call results at the same block.
+    individual = [
+        await substrate.runtime_call(api, method, params=params, block_hash=block_hash)
+        for api, method, params in calls
+    ]
+    assert batched == individual
+    print("test_runtime_calls succeeded")
+
+
+@pytest.mark.asyncio
 async def test_reconnection():
     """
     Does not use the substrate fixture because this needs to reconnect

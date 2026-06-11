@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from scalecodec.types import GenericCall
 
 from async_substrate_interface.sync_substrate import (
@@ -60,6 +61,93 @@ def test_runtime_call(monkeypatch):
     )
     substrate.close()
     print("test_runtime_call succeeded")
+
+
+def test_runtime_calls():
+    """Multiple runtime calls are encoded, sent as one batch, and decoded in order."""
+    print("Testing test_runtime_calls")
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+
+    fake_runtime = MagicMock()
+    fake_runtime.metadata_v15 = MagicMock()  # non-None so the V15 path is taken
+    fake_runtime.runtime_api_map = {
+        "Api": {
+            "m1": {"inputs": [{"name": "a", "ty": "3"}], "output": "1"},
+            "m2": {"inputs": [{"name": "b", "ty": "4"}], "output": "2"},
+        }
+    }
+    fake_runtime.type_id_to_name = {}  # no Vec<u8> outputs → modern path for both
+    substrate.init_runtime = MagicMock(return_value=fake_runtime)
+
+    # block_hash=None is pinned to the chain head so the batch is a consistent snapshot.
+    substrate.get_chain_head = MagicMock(return_value="0xBLOCK")
+
+    # Each input encodes to a single byte 0xab → hex "ab".
+    substrate.encode_scale = MagicMock(return_value=b"\xab")
+
+    decoded_1, decoded_2 = MagicMock(), MagicMock()
+    decoded_1.value, decoded_2.value = "result_1", "result_2"
+    substrate.decode_scale = MagicMock(side_effect=[decoded_1, decoded_2])
+
+    # The batch transport is mocked: it returns the raw responses in payload order.
+    substrate._make_batch_rpc_request = MagicMock(
+        return_value=[{"result": "0x00"}, {"result": "0x01"}]
+    )
+
+    results = substrate.runtime_calls(
+        [
+            ("Api", "m1", ["foo"]),
+            ("Api", "m2", {"b": "bar"}),
+        ]
+    )
+
+    assert results == ["result_1", "result_2"]
+
+    # One batch carrying both state_call payloads, pinned to the same block.
+    substrate._make_batch_rpc_request.assert_called_once_with(
+        [
+            {
+                "jsonrpc": "2.0",
+                "method": "state_call",
+                "params": ["Api_m1", "ab", "0xBLOCK"],
+            },
+            {
+                "jsonrpc": "2.0",
+                "method": "state_call",
+                "params": ["Api_m2", "ab", "0xBLOCK"],
+            },
+        ]
+    )
+
+    # Results decoded against each call's own output type, in input order.
+    substrate.decode_scale.assert_any_call("scale_info::1", b"\x00")
+    substrate.decode_scale.assert_any_call("scale_info::2", b"\x01")
+    substrate.close()
+    print("test_runtime_calls succeeded")
+
+
+def test_runtime_calls_unknown_method_raises():
+    """An unknown api.method surfaces a ValueError before anything is sent."""
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    fake_runtime = MagicMock()
+    fake_runtime.metadata_v15 = MagicMock()
+    fake_runtime.runtime_api_map = {"Api": {}}
+    fake_runtime.type_id_to_name = {}
+    substrate.init_runtime = MagicMock(return_value=fake_runtime)
+    substrate.get_chain_head = MagicMock(return_value="0xBLOCK")
+
+    with pytest.raises(ValueError, match="not found in registry"):
+        substrate.runtime_calls([("Api", "missing", None)])
+    substrate.close()
+
+
+def test_runtime_calls_empty_returns_empty():
+    """No calls means no request and an empty result list."""
+    substrate = SubstrateInterface("ws://localhost", _mock=True)
+    substrate.init_runtime = MagicMock()
+    assert substrate.runtime_calls([]) == []
+    substrate.init_runtime.assert_not_called()
+    substrate.close()
 
 
 def test_async_query_map_result_retrieve_all_records():

@@ -884,7 +884,49 @@ class SubstrateInterface(SubstrateMixin):
             pallet,
             storage_function,
             params or [],
-            runtime_config=self.runtime_config,
+            runtime_config=runtime.runtime_config,
+            metadata=runtime.metadata,
+        )
+
+    def create_storage_keys(
+        self,
+        pallet: str,
+        storage_function: str,
+        params: list[list],
+        block_hash: Optional[str] = None,
+    ) -> list[StorageKey]:
+        """
+        Creates a batch of storage keys with the same pallet/storage function, but with differing params.
+
+        Args:
+            pallet: name of pallet
+            storage_function: name of storage function
+            params: list of lists of parameters in case of a Mapped storage function
+            block_hash: the hash of the blockchain block whose runtime to use
+
+        Example:
+
+        ```
+        storage_keys = substrate.create_storage_keys(
+            pallet="Balances",
+            storage_function="Account",
+            params=[
+                ["5gkods..."],
+                ["5jkgji..."],
+                ["5kdfni..."],
+            ],
+            block_hash="0xj9d3...",
+        ```
+
+        Returns:
+            list of StorageKeys
+        """
+        runtime = self.init_runtime(block_hash=block_hash)
+        return StorageKey.create_from_storage_function_batch(
+            pallet,
+            storage_function,
+            params,
+            runtime_config=runtime.runtime_config,
             metadata=runtime.metadata,
         )
 
@@ -1855,6 +1897,62 @@ class SubstrateInterface(SubstrateMixin):
 
         return request_manager.get_results()
 
+    def _make_batch_rpc_request(
+        self, payloads: list[dict], attempt: int = 1
+    ) -> list[dict]:
+        """
+        Sends multiple payloads as a single JSON-RPC 2.0 batch (one websocket frame
+        containing an array of requests) and gathers the responses, demuxed by id.
+
+        Args:
+            payloads: list of JSON-RPC payload dicts, each with "jsonrpc", "method",
+                and "params" (without "id" — an id is assigned here per sub-request).
+            attempt: current attempt number, used for retry/reconnect bookkeeping.
+
+        Returns:
+            list of raw response dicts, in the same order as `payloads`.
+        """
+        ids = [get_next_id() for _ in payloads]
+        batch = [{**payload, "id": id_} for payload, id_ in zip(payloads, ids)]
+        id_set = set(ids)
+        results: dict[str, dict] = {}
+
+        ws = self.connect(init=False if attempt == 1 else True)
+        to_send = json.dumps(batch)
+        if self.log_raw_websockets:
+            raw_websocket_logger.debug(f"WEBSOCKET_SEND> {to_send}")
+        ws.send(to_send)
+
+        while len(results) < len(ids):
+            try:
+                recd = ws.recv(timeout=self.retry_timeout, decode=False)
+                if self.log_raw_websockets:
+                    raw_websocket_logger.debug(f"WEBSOCKET_RECEIVE> {recd.decode()}")
+                response = json.loads(recd)
+            except (TimeoutError, ConnectionClosed):
+                if attempt >= self.max_retries:
+                    logger.warning(
+                        f"Timed out waiting for RPC requests {attempt} times. Exiting."
+                    )
+                    raise MaxRetriesExceeded("Max retries reached.")
+                return self._make_batch_rpc_request(payloads, attempt + 1)
+
+            if isinstance(response, list):
+                items = response
+            elif "error" in response:
+                # A non-array reply to a batch is almost always a top-level error.
+                raise SubstrateRequestException(str(response))
+            else:
+                items = [response]
+
+            # Demux by id; ignore any frame not part of this batch (e.g. a stray
+            # late subscription notification on the shared connection).
+            for item in items:
+                if item.get("id") in id_set:
+                    results[item["id"]] = item
+
+        return [results[id_] for id_ in ids]
+
     @functools.lru_cache(maxsize=SUBSTRATE_CACHE_METHOD_SIZE)
     def supports_rpc_method(self, name: str) -> bool:
         """
@@ -2494,6 +2592,135 @@ class SubstrateInterface(SubstrateMixin):
         obj = self.decode_scale(output_type_string, result_bytes)
         # protect against `None`s from decode_scale
         return obj.value
+
+    def runtime_calls(
+        self,
+        calls: list[tuple[str, str, Optional[list | dict]]],
+        block_hash: Optional[str] = None,
+    ) -> list[ScaleValue]:
+        """
+        Calls multiple runtime API methods in a single JSON-RPC 2.0 batch request.
+
+        This is the runtime-call analogue of `query_multi`: rather than one `state_call`
+        round-trip per call, every call is encoded and sent as a single websocket frame
+        (a JSON-RPC batch), and the responses are demuxed and decoded individually. All
+        calls are executed at the same `block_hash`, giving a consistent snapshot.
+
+        Example:
+
+        ```
+        results = substrate.runtime_calls(
+            [
+                ("AccountNonceApi", "account_nonce", [account_id]),
+                ("TransactionPaymentApi", "query_fee_details", [extrinsic, length]),
+            ]
+        )
+        ```
+
+        Note:
+            - Requires the RPC node to support JSON-RPC 2.0 batch requests. All
+              Substrate/jsonrpsee nodes do so by default.
+            - Only the modern (metadata v15) runtime-call path is supported. If the
+              runtime predates metadata v15, or any call resolves to a legacy
+              runtime-call definition, a `NotImplementedError` is raised — use
+              `runtime_call` for those.
+            - The advantage of batching here is that all calls travel as a single
+              JSON-RPC message, which helps against endpoints that rate-limit per
+              message, plus the consistent-snapshot and one-message-one-reply semantics.
+
+        Args:
+            calls: list of `(api, method, params)` tuples. `params` may be a list, a
+                dict, or `None` (same semantics as `runtime_call`).
+            block_hash: Hash of the block at which to make the runtime API calls.
+
+        Returns:
+            list of decoded runtime-call results, in the same order as `calls`.
+        """
+        if not calls:
+            return []
+
+        # Pin to a concrete block so every call in the batch hits the same state,
+        # even if the chain advances mid-request (a plain `None` would let each
+        # call resolve "best block" independently).
+        if block_hash is None:
+            block_hash = self.get_chain_head()
+
+        runtime = self.init_runtime(block_hash=block_hash)
+
+        if runtime.metadata_v15 is None:
+            raise NotImplementedError(
+                "runtime_calls only supports the modern (metadata v15) runtime-call "
+                "path. Use runtime_call for legacy runtimes."
+            )
+
+        payloads: list[dict] = []
+        call_defs: list[dict] = []
+        for api, method, params in calls:
+            if params is None:
+                params = {}
+
+            try:
+                runtime_call_def = runtime.runtime_api_map[api][method]
+            except KeyError:
+                raise ValueError(
+                    f"Runtime API Call '{api}.{method}' not found in registry"
+                )
+
+            if _determine_if_old_runtime_call(runtime_call_def, runtime):
+                raise NotImplementedError(
+                    f"Runtime call '{api}.{method}' uses the legacy call path, which "
+                    f"runtime_calls does not support. Use runtime_call instead."
+                )
+
+            if isinstance(params, list) and len(params) != len(
+                runtime_call_def["inputs"]
+            ):
+                raise ValueError(
+                    f"Number of parameter provided ({len(params)}) does not "
+                    f"match definition {len(runtime_call_def['inputs'])} for "
+                    f"'{api}.{method}'"
+                )
+
+            # Encode params
+            param_data = b""
+            for idx, param in enumerate(runtime_call_def["inputs"]):
+                param_type_string = f"scale_info::{param['ty']}"
+                if isinstance(params, list):
+                    param_data += self.encode_scale(
+                        param_type_string, params[idx], runtime=runtime
+                    )
+                else:
+                    if param["name"] not in params:
+                        raise ValueError(
+                            f"Runtime Call param '{param['name']}' is missing for "
+                            f"'{api}.{method}'"
+                        )
+                    param_data += self.encode_scale(
+                        param_type_string, params[param["name"]], runtime=runtime
+                    )
+
+            payloads.append(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "state_call",
+                    "params": [f"{api}_{method}", param_data.hex(), block_hash],
+                }
+            )
+            call_defs.append(runtime_call_def)
+
+        # Send all calls as one JSON-RPC batch frame, then gather responses by id.
+        responses = self._make_batch_rpc_request(payloads)
+
+        # Decode each result against its own output type, preserving input order.
+        results: list[ScaleValue] = []
+        for result_data, runtime_call_def in zip(responses, call_defs):
+            if "error" in result_data:
+                raise SubstrateRequestException(result_data["error"]["message"])
+            output_type_string = f"scale_info::{runtime_call_def['output']}"
+            result_bytes = hex_to_bytes(result_data["result"])
+            obj = self.decode_scale(output_type_string, result_bytes)
+            results.append(obj.value)
+        return results
 
     def get_account_nonce(self, account_address: str) -> int:
         """
